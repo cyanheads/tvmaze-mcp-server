@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "tvmaze-mcp-server",
+  "version": "0.1.0",
+  "description": "Television series and episode schedules — search shows, next episodes in your timezone, episode guides, daily broadcast and streaming schedules, and cast via TVmaze.",
+  "author": {
+    "name": "Casey Hand",
+    "email": "casey@caseyjhand.com",
+    "url": "https://caseyjhand.com"
+  },
+  "homepage": "https://github.com/cyanheads/tvmaze-mcp-server#readme",
+  "repository": "https://github.com/cyanheads/tvmaze-mcp-server",
+  "license": "Apache-2.0",
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "model-context-protocol",
+    "tvmaze",
+    "television",
+    "tv-shows",
+    "episodes",
+    "tv-schedule"
+  ],
+  "mcpServers": {
+    "tvmaze-mcp-server": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@cyanheads/tvmaze-mcp-server"
+      ],
+      "env": {
+        "MCP_TRANSPORT_TYPE": "stdio"
+      }
+    }
+  }
+}

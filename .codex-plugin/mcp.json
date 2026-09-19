@@ -1,0 +1,12 @@
+{
+  "tvmaze-mcp-server": {
+    "command": "npx",
+    "args": [
+      "-y",
+      "@cyanheads/tvmaze-mcp-server"
+    ],
+    "env": {
+      "MCP_TRANSPORT_TYPE": "stdio"
+    }
+  }
+}
