@@ -17,7 +17,14 @@
       "env": {
         "MCP_TRANSPORT_TYPE": "stdio",
         "MCP_AUTH_MODE": "none",
-        "NODE_ENV": "production"
+        "NODE_ENV": "production",
+        "TVMAZE_BASE_URL": "${user_config.TVMAZE_BASE_URL}",
+        "TVMAZE_USER_AGENT": "${user_config.TVMAZE_USER_AGENT}",
+        "TVMAZE_DEFAULT_TIMEZONE": "${user_config.TVMAZE_DEFAULT_TIMEZONE}",
+        "TVMAZE_DEFAULT_COUNTRY": "${user_config.TVMAZE_DEFAULT_COUNTRY}",
+        "TVMAZE_CACHE_TTL_S": "${user_config.TVMAZE_CACHE_TTL_S}",
+        "TVMAZE_MAX_CONCURRENCY": "${user_config.TVMAZE_MAX_CONCURRENCY}",
+        "TVMAZE_REQUEST_TIMEOUT_MS": "${user_config.TVMAZE_REQUEST_TIMEOUT_MS}"
       }
     }
   },
@@ -28,7 +35,57 @@
   },
   "tools_generated": true,
   "prompts_generated": true,
-  "user_config": {},
+  "user_config": {
+    "TVMAZE_BASE_URL": {
+      "title": "TVmaze Base URL",
+      "description": "TVmaze API base URL. Override to point at an enterprise endpoint.",
+      "type": "string",
+      "required": false,
+      "default": "https://api.tvmaze.com"
+    },
+    "TVMAZE_USER_AGENT": {
+      "title": "User Agent",
+      "description": "User-Agent sent on every upstream request. TVmaze asks that clients identify themselves. Leave blank to use the server name, version, and repository URL.",
+      "type": "string",
+      "required": false,
+      "default": ""
+    },
+    "TVMAZE_DEFAULT_TIMEZONE": {
+      "title": "Default Timezone",
+      "description": "IANA timezone used when a tool call omits the timezone argument (e.g. America/Los_Angeles).",
+      "type": "string",
+      "required": false,
+      "default": "UTC"
+    },
+    "TVMAZE_DEFAULT_COUNTRY": {
+      "title": "Default Country",
+      "description": "ISO 3166-1 alpha-2 country used for schedule scopes linear and all when country is omitted.",
+      "type": "string",
+      "required": false,
+      "default": "US"
+    },
+    "TVMAZE_CACHE_TTL_S": {
+      "title": "Cache TTL (seconds)",
+      "description": "Seconds to hold an upstream response in the in-process cache. 0 disables caching.",
+      "type": "string",
+      "required": false,
+      "default": "300"
+    },
+    "TVMAZE_MAX_CONCURRENCY": {
+      "title": "Max Concurrency",
+      "description": "Concurrent upstream requests.",
+      "type": "string",
+      "required": false,
+      "default": "4"
+    },
+    "TVMAZE_REQUEST_TIMEOUT_MS": {
+      "title": "Request Timeout (ms)",
+      "description": "Per-request timeout in milliseconds.",
+      "type": "string",
+      "required": false,
+      "default": "10000"
+    }
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/cyanheads/tvmaze-mcp-server"

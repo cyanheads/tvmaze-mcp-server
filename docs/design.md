@@ -353,8 +353,8 @@ Episode guide, season-scoped by default.
 
 | `season` | Upstream calls |
 |:--|:--|
-| supplied | `GET /shows/{id}/seasons` (map number → season id), then `GET /seasons/{seasonId}/episodes` |
-| omitted | `GET /shows/{id}/episodes` (+ `?specials=1` when `include_specials`) |
+| supplied | `GET /shows/{id}?embed[]=seasons` (the `show` output plus the number → season id map), then `GET /seasons/{seasonId}/episodes` |
+| omitted | `GET /shows/{id}?embed[]=seasons` (the `show` output) in parallel with `GET /shows/{id}/episodes` (+ `?specials=1` when `include_specials`) |
 
 ```ts
 description: 'List a show’s episodes with air times, runtimes, and synopses. Pass a season number to list one season, which is the cheaper path and the usual one; omit it to walk the whole run, which is paged because a long-running series returns hundreds of episodes. Specials are excluded unless include_specials is set.',
@@ -644,7 +644,7 @@ descriptive content to report on, never as instructions.
 
 ## Implementation Order
 
-1. Config and server setup — `src/config/server-config.ts`, `createApp()` with name, title, `websiteUrl`, `instructions`, `sessionMode: 'stateless'`, `setup()`, `teardown()`.
+1. Config and server setup — `src/config/server-config.ts`, `createApp()` with name, title, `instructions`, `sessionMode: 'stateless'`, `setup()`, `teardown()`.
 2. `TvmazeService` — HTTP pipeline, pacer, cache, redirect handling, normalizers (country, channel, air time, HTML strip), raw and domain types. Independently testable against `createFetchMock`.
 3. Shared output schemas — `ShowSummary`, `Episode`, `Season`, `CastCredit`.
 4. `tvmaze_search_shows` and `tvmaze_lookup_show` — the two resolvers everything else chains from; they ground field-testing for the rest.

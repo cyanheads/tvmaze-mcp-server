@@ -26,6 +26,54 @@
       ],
       "environmentVariables": [
         {
+          "name": "TVMAZE_BASE_URL",
+          "description": "TVmaze API base URL. Override to point at an enterprise endpoint.",
+          "format": "string",
+          "isRequired": false,
+          "default": "https://api.tvmaze.com"
+        },
+        {
+          "name": "TVMAZE_USER_AGENT",
+          "description": "User-Agent sent on every upstream request. TVmaze asks that clients identify themselves. Defaults to the server name, version, and repository URL.",
+          "format": "string",
+          "isRequired": false
+        },
+        {
+          "name": "TVMAZE_DEFAULT_TIMEZONE",
+          "description": "IANA timezone used when a tool call omits 'timezone' (e.g. 'America/Los_Angeles').",
+          "format": "string",
+          "isRequired": false,
+          "default": "UTC"
+        },
+        {
+          "name": "TVMAZE_DEFAULT_COUNTRY",
+          "description": "ISO 3166-1 alpha-2 country used for tvmaze_get_schedule scopes 'linear' and 'all' when 'country' is omitted.",
+          "format": "string",
+          "isRequired": false,
+          "default": "US"
+        },
+        {
+          "name": "TVMAZE_CACHE_TTL_S",
+          "description": "Seconds to hold an upstream response in the in-process cache. 0 disables caching.",
+          "format": "string",
+          "isRequired": false,
+          "default": "300"
+        },
+        {
+          "name": "TVMAZE_MAX_CONCURRENCY",
+          "description": "Concurrent upstream requests.",
+          "format": "string",
+          "isRequired": false,
+          "default": "4"
+        },
+        {
+          "name": "TVMAZE_REQUEST_TIMEOUT_MS",
+          "description": "Per-request timeout in milliseconds.",
+          "format": "string",
+          "isRequired": false,
+          "default": "10000"
+        },
+        {
           "name": "MCP_LOG_LEVEL",
           "description": "Sets the minimum log level for output (e.g., 'debug', 'info', 'warn').",
           "format": "string",
@@ -54,6 +102,54 @@
         }
       ],
       "environmentVariables": [
+        {
+          "name": "TVMAZE_BASE_URL",
+          "description": "TVmaze API base URL. Override to point at an enterprise endpoint.",
+          "format": "string",
+          "isRequired": false,
+          "default": "https://api.tvmaze.com"
+        },
+        {
+          "name": "TVMAZE_USER_AGENT",
+          "description": "User-Agent sent on every upstream request. TVmaze asks that clients identify themselves. Defaults to the server name, version, and repository URL.",
+          "format": "string",
+          "isRequired": false
+        },
+        {
+          "name": "TVMAZE_DEFAULT_TIMEZONE",
+          "description": "IANA timezone used when a tool call omits 'timezone' (e.g. 'America/Los_Angeles').",
+          "format": "string",
+          "isRequired": false,
+          "default": "UTC"
+        },
+        {
+          "name": "TVMAZE_DEFAULT_COUNTRY",
+          "description": "ISO 3166-1 alpha-2 country used for tvmaze_get_schedule scopes 'linear' and 'all' when 'country' is omitted.",
+          "format": "string",
+          "isRequired": false,
+          "default": "US"
+        },
+        {
+          "name": "TVMAZE_CACHE_TTL_S",
+          "description": "Seconds to hold an upstream response in the in-process cache. 0 disables caching.",
+          "format": "string",
+          "isRequired": false,
+          "default": "300"
+        },
+        {
+          "name": "TVMAZE_MAX_CONCURRENCY",
+          "description": "Concurrent upstream requests.",
+          "format": "string",
+          "isRequired": false,
+          "default": "4"
+        },
+        {
+          "name": "TVMAZE_REQUEST_TIMEOUT_MS",
+          "description": "Per-request timeout in milliseconds.",
+          "format": "string",
+          "isRequired": false,
+          "default": "10000"
+        },
         {
           "name": "MCP_HTTP_HOST",
           "description": "The hostname for the HTTP server.",
