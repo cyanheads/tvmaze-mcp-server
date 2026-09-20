@@ -207,10 +207,29 @@ export const CastCredit = z.object({
 /** What an absent optional value renders as — never `0`, `""`, or `false`. */
 export const NOT_AVAILABLE = 'Not available';
 
+/**
+ * Characters that would let one upstream value open a markdown block of its own
+ * — a heading, a list item, a second field line — once rendered into
+ * `content[]`. C0 and C1 controls plus the Unicode line separators.
+ */
+const LINE_BREAKING_CHARACTERS = /[\p{Cc}\p{Zl}\p{Zp}]/gu;
+
+/**
+ * Flatten an upstream string onto the single line it is rendered into. Every
+ * TVmaze title, name, and label is contributor-authored, so a value is text to
+ * display, never structure this renderer agreed to emit.
+ */
+export function inline(value: string): string {
+  return value.replace(LINE_BREAKING_CHARACTERS, ' ').trim();
+}
+
 function present(value: unknown): string {
   if (value === undefined || value === null) return NOT_AVAILABLE;
-  if (typeof value === 'string') return value.length > 0 ? value : NOT_AVAILABLE;
-  if (Array.isArray(value)) return value.length > 0 ? value.join(', ') : NOT_AVAILABLE;
+  if (typeof value === 'string') return inline(value) || NOT_AVAILABLE;
+  if (Array.isArray(value)) {
+    const items = value.map((item) => (typeof item === 'string' ? inline(item) : String(item)));
+    return items.length > 0 ? items.join(', ') : NOT_AVAILABLE;
+  }
   return String(value);
 }
 
@@ -228,6 +247,17 @@ export function yearRange(show: {
 }
 
 /**
+ * Render a contributor-authored synopsis as a quoted block. A summary is
+ * third-party prose relayed into the model's context, and an unframed one can
+ * reproduce this renderer's own field lines and headings verbatim — quoting
+ * keeps the line between the server's structure and the source's text visible.
+ */
+export function summaryLines(summary: string | undefined): string[] {
+  if (!summary) return [field('summary', summary)];
+  return ['**summary:**', ...summary.split('\n').map((line) => `> ${inline(line)}`)];
+}
+
+/**
  * Every {@link ShowSummary} field except `name`, which callers render as the
  * heading of the block these lines go under.
  */
@@ -242,7 +272,7 @@ export function showSummaryLines(show: z.infer<typeof ShowSummary>): string[] {
     field('rating', show.rating),
     `**externals:** imdb ${present(show.externals.imdb)} · thetvdb ${present(show.externals.thetvdb)} · tvrage ${present(show.externals.tvrage)}`,
     field('image_url', show.image_url),
-    field('summary', show.summary),
+    ...summaryLines(show.summary),
   ];
 }
 
@@ -253,7 +283,7 @@ export function episodeLines(episode: z.infer<typeof Episode>): string[] {
     `${field('local_date', episode.local_date)} | ${field('local_time', episode.local_time)}${episode.time_known ? '' : ' (time not announced)'}`,
     `${field('time_known', episode.time_known)} | ${field('airstamp', episode.airstamp)} | ${field('runtime_minutes', episode.runtime_minutes)} | ${field('rating', episode.rating)}`,
     `${field('url', episode.url)} | ${field('image_url', episode.image_url)}`,
-    field('summary', episode.summary),
+    ...summaryLines(episode.summary),
   ];
 }
 

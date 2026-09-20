@@ -101,6 +101,30 @@ describe('decodeHtmlEntities', () => {
   });
 });
 
+describe('stripHtml / decodeHtmlEntities — contributor-authored content', () => {
+  it('leaves an entity naming an inherited Object property untouched instead of resolving it', () => {
+    expect(decodeHtmlEntities('&constructor;')).toBe('&constructor;');
+    expect(decodeHtmlEntities('&__proto__;')).toBe('&__proto__;');
+    expect(decodeHtmlEntities('&toString;&hasOwnProperty;')).toBe('&toString;&hasOwnProperty;');
+  });
+
+  it('leaves an out-of-range numeric entity untouched instead of throwing', () => {
+    expect(stripHtml('Before &#1114112; after')).toBe('Before &#1114112; after');
+    expect(stripHtml('Before &#x110000; after')).toBe('Before &#x110000; after');
+    expect(stripHtml('&#99999999999;')).toBe('&#99999999999;');
+  });
+
+  it('strips control characters, including ones smuggled in as numeric entities', () => {
+    expect(stripHtml('Now &#x1b;[31mred&#x1b;[0m')).toBe('Now [31mred[0m');
+    expect(stripHtml('A\u0000B\u0007C\u009bD')).toBe('ABCD');
+    expect(stripHtml('one\u2028two\u2029three')).toBe('onetwothree');
+  });
+
+  it('keeps the newlines the paragraph and <br> conversions produce', () => {
+    expect(stripHtml('<p>A</p>B<br>C')).toBe('A\n\nB\nC');
+  });
+});
+
 describe('normalizeCountry', () => {
   it('uppercases a lowercase code', () => {
     expect(normalizeCountry('gb')).toBe('GB');
@@ -361,6 +385,31 @@ describe('TvmazeService HTTP boundary', () => {
     http.route({ match: `${BASE_URL}/search/shows?q=zzzz`, respond: Response.json([]) });
     const hits = await service().searchShows('zzzz', createMockContext());
     expect(hits).toEqual([]);
+  });
+
+  it('percent-encodes a query so it cannot inject an extra upstream parameter', async () => {
+    http.route({
+      match: `${BASE_URL}/search/shows?q=breaking%26country%3DZZ%23x`,
+      respond: Response.json([]),
+    });
+    await service().searchShows('breaking&country=ZZ#x', createMockContext());
+    expect(http.calls).toHaveLength(1);
+  });
+
+  it('refuses a season id the upstream did not send as a plain integer, rather than fetching the path it composes', async () => {
+    // `/seasons/1/../../shows/169/episodes` normalizes to the whole-run route.
+    http.route({
+      match: `${BASE_URL}/shows/169/episodes`,
+      respond: Response.json([rawEpisode()]),
+    });
+    await expect(
+      service().getSeasonEpisodes(
+        '1/../../shows/169' as unknown as number,
+        'UTC',
+        createMockContext(),
+      ),
+    ).rejects.toThrow();
+    expect(http.calls).toHaveLength(0);
   });
 
   it('getShowDetail returns null on a 404 (bad id)', async () => {

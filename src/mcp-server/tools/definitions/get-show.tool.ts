@@ -12,6 +12,7 @@ import {
   Episode,
   episodeLines,
   field,
+  inline,
   NOT_AVAILABLE,
   SEASON_TABLE_HEADER,
   Season,
@@ -123,7 +124,7 @@ export const getShow = tool('tvmaze_get_show', {
   },
 
   format: (result) => {
-    const lines: string[] = [`# ${result.show.name}`, ...showSummaryLines(result.show)];
+    const lines: string[] = [`# ${inline(result.show.name)}`, ...showSummaryLines(result.show)];
     lines.push(
       `${field('official_site', result.show.official_site)} | ${field('schedule_days', result.show.schedule_days)} | ${field('schedule_time', result.show.schedule_time)}`,
       field('timezone', result.timezone),

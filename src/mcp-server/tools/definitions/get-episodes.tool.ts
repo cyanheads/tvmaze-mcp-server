@@ -10,7 +10,14 @@ import { paginateArray } from '@cyanheads/mcp-ts-core/utils';
 
 import { getTvmazeService } from '@/services/tvmaze/tvmaze-service.js';
 import type { Episode as EpisodeShape, Season as SeasonShape } from '@/services/tvmaze/types.js';
-import { Episode, episodeLines, field, ShowSummary, showSummaryLines } from './shared-schemas.js';
+import {
+  Episode,
+  episodeLines,
+  field,
+  inline,
+  ShowSummary,
+  showSummaryLines,
+} from './shared-schemas.js';
 
 /** The highest page size the `limit` input allows, and the ceiling a cursor is clamped to. */
 const MAX_PAGE_SIZE = 250;
@@ -219,7 +226,7 @@ export const getEpisodes = tool('tvmaze_get_episodes', {
   format: (result) => {
     const scope = result.season === undefined ? 'all episodes' : `Season ${result.season}`;
     const lines: string[] = [
-      `# ${result.show.name} — ${scope}`,
+      `# ${inline(result.show.name)} — ${scope}`,
       `${field('season', result.season)} | ${field('timezone', result.timezone)}`,
       ...showSummaryLines(result.show),
     ];

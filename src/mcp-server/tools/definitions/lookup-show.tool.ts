@@ -8,7 +8,7 @@ import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
 
 import { getTvmazeService } from '@/services/tvmaze/tvmaze-service.js';
-import { field, ShowSummary, showSummaryLines } from './shared-schemas.js';
+import { field, inline, ShowSummary, showSummaryLines } from './shared-schemas.js';
 
 export const lookupShow = tool('tvmaze_lookup_show', {
   description:
@@ -82,7 +82,7 @@ export const lookupShow = tool('tvmaze_lookup_show', {
   format: (result) => {
     const lines: string[] = [];
     if (result.show) {
-      lines.push(`# ${result.show.name}`, ...showSummaryLines(result.show));
+      lines.push(`# ${inline(result.show.name)}`, ...showSummaryLines(result.show));
     }
     if (result.guidance) {
       lines.push('**No match**', field('guidance', result.guidance));

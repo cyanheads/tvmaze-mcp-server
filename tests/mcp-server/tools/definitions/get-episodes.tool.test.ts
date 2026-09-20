@@ -197,6 +197,32 @@ describe('tvmaze_get_episodes', () => {
     });
   });
 
+  it('fails loudly on a season id the upstream did not send as an integer, without fetching the path it composes', async () => {
+    getHttp().route({
+      match: `${TVMAZE_TEST_BASE_URL}/shows/169?embed[]=seasons`,
+      respond: Response.json(
+        rawShow({
+          _embedded: {
+            seasons: [rawSeason({ id: '1/../../shows/169' as unknown as number, number: 1 })],
+          },
+        }),
+      ),
+    });
+    // `/seasons/1/../../shows/169/episodes` normalizes onto the whole-run route.
+    getHttp().route({
+      match: `${TVMAZE_TEST_BASE_URL}/shows/169/episodes`,
+      respond: Response.json([rawEpisode({ id: 4242, name: 'Traversed' })]),
+    });
+
+    const result = await runToolContract(getEpisodes, { show_id: 169, season: 1 });
+    expect(result.isError).toBe(true);
+    expect(errorEnvelope(result.structuredContent).error).toBeDefined();
+    expect((result.content[0] as { text: string }).text).not.toContain('Traversed');
+    expect(getHttp().calls.map((call) => call.request.url)).not.toContain(
+      `${TVMAZE_TEST_BASE_URL}/shows/169/episodes`,
+    );
+  });
+
   it('produces invalid_timezone on both surfaces', async () => {
     getHttp().route({
       match: `${TVMAZE_TEST_BASE_URL}/shows/169?embed[]=seasons`,

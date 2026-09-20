@@ -8,7 +8,14 @@ import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
 
 import { getTvmazeService } from '@/services/tvmaze/tvmaze-service.js';
-import { Episode, episodeLines, field, ShowSummary, showSummaryLines } from './shared-schemas.js';
+import {
+  Episode,
+  episodeLines,
+  field,
+  inline,
+  ShowSummary,
+  showSummaryLines,
+} from './shared-schemas.js';
 
 const TIMEZONE_INPUT = z
   .string()
@@ -148,13 +155,17 @@ export const getNextEpisode = tool('tvmaze_get_next_episode', {
     if (!result.found) lines.push('**No scheduled episode**');
     if (result.guidance) lines.push(field('guidance', result.guidance));
     if (result.next_episode) {
-      lines.push('', `## Next: ${result.next_episode.name}`, ...episodeLines(result.next_episode));
+      lines.push(
+        '',
+        `## Next: ${inline(result.next_episode.name)}`,
+        ...episodeLines(result.next_episode),
+      );
     }
     if (result.previous_episode) {
       lines.push('', '## Previously', ...episodeLines(result.previous_episode));
     }
     if (result.show) {
-      lines.push('', `## Show: ${result.show.name}`, ...showSummaryLines(result.show));
+      lines.push('', `## Show: ${inline(result.show.name)}`, ...showSummaryLines(result.show));
     }
     return [{ type: 'text', text: lines.join('\n') }];
   },

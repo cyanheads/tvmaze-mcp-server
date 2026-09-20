@@ -8,7 +8,7 @@ import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
 
 import { getTvmazeService } from '@/services/tvmaze/tvmaze-service.js';
-import { field, ShowSummary, showSummaryLines, yearRange } from './shared-schemas.js';
+import { field, inline, ShowSummary, showSummaryLines, yearRange } from './shared-schemas.js';
 
 /** The source's fixed ceiling on `/search/shows`. There is no paging past it. */
 const SEARCH_RESULT_CAP = 10;
@@ -97,7 +97,7 @@ export const searchShows = tool('tvmaze_search_shows', {
     for (const show of result.shows) {
       lines.push(
         '',
-        `### ${show.name} (${yearRange(show)})`,
+        `### ${inline(`${show.name} (${yearRange(show)})`)}`,
         field('match_score', show.match_score),
         ...showSummaryLines(show),
       );

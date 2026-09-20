@@ -11,6 +11,7 @@ import { config } from '@cyanheads/mcp-ts-core/config';
 import {
   JsonRpcErrorCode,
   McpError,
+  serializationError,
   serviceUnavailable,
   validationError,
 } from '@cyanheads/mcp-ts-core/errors';
@@ -51,23 +52,48 @@ const MAX_CACHE_ENTRIES = 500;
 // HTML
 // ---------------------------------------------------------------------------
 
-const HTML_ENTITIES: Record<string, string> = {
-  amp: '&',
-  lt: '<',
-  gt: '>',
-  quot: '"',
-  apos: "'",
-  nbsp: ' ',
-};
+/**
+ * A `Map`, not an object literal: the entity name comes from contributor-authored
+ * markup, and a plain object would resolve `&constructor;` or `&toString;`
+ * through `Object.prototype` and splice a JS internal into the summary.
+ */
+const HTML_ENTITIES = new Map<string, string>([
+  ['amp', '&'],
+  ['lt', '<'],
+  ['gt', '>'],
+  ['quot', '"'],
+  ['apos', "'"],
+  ['nbsp', ' '],
+]);
 
-/** Decode numeric and the handful of named HTML entities TVmaze summaries use. */
+/** Highest code point `String.fromCodePoint` accepts; anything above throws. */
+const MAX_CODE_POINT = 0x10_ff_ff;
+
+/**
+ * Characters a terminal or a markdown reader interprets as control rather than
+ * prose: the C0 and C1 blocks plus the Unicode line separators. Summaries are
+ * contributor-authored, so an escape sequence in one is input to reject, not a
+ * fault upstream. Tab and newline are the two a synopsis legitimately carries,
+ * and are kept at the replace site.
+ */
+const CONTROL_CHARACTERS = /[\p{Cc}\p{Zl}\p{Zp}]/gu;
+
+/**
+ * Decode numeric and the handful of named HTML entities TVmaze summaries use.
+ * An entity naming something other than those six, or a code point outside the
+ * Unicode range, is left verbatim — the alternative is a JS internal in the
+ * output or a `RangeError` that fails the whole call over one bad character.
+ */
 export function decodeHtmlEntities(text: string): string {
   return text.replace(
     /&(?:#x([0-9a-fA-F]+)|#(\d+)|(\w+));/g,
     (match: string, hex?: string, dec?: string, named?: string) => {
-      if (hex) return String.fromCodePoint(Number.parseInt(hex, 16));
-      if (dec) return String.fromCodePoint(Number.parseInt(dec, 10));
-      return (named ? HTML_ENTITIES[named] : undefined) ?? match;
+      if (hex !== undefined || dec !== undefined) {
+        const codePoint =
+          hex === undefined ? Number.parseInt(dec ?? '', 10) : Number.parseInt(hex, 16);
+        return codePoint <= MAX_CODE_POINT ? String.fromCodePoint(codePoint) : match;
+      }
+      return (named === undefined ? undefined : HTML_ENTITIES.get(named)) ?? match;
     },
   );
 }
@@ -87,6 +113,9 @@ export function stripHtml(html: string): string {
     .replace(/<\/?(?:i|em)(?:\s[^>]*)?>/gi, '*')
     .replace(/<[^>]+>/g, '');
   return decodeHtmlEntities(text)
+    .replace(CONTROL_CHARACTERS, (character) =>
+      character === '\n' || character === '\t' ? character : '',
+    )
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
@@ -344,6 +373,22 @@ class ResponseCache {
 // Service
 // ---------------------------------------------------------------------------
 
+/**
+ * Render an id that came out of an upstream document into a URL path segment.
+ * A response body is a system edge, so the `number` the record type promises is
+ * a claim, not a fact: a string there would otherwise be interpolated straight
+ * into the next request's path, where `..` segments resolve against the base
+ * URL and silently redirect the call to a different endpoint.
+ */
+function pathId(value: number, fieldName: string): string {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) {
+    throw serializationError(`TVmaze returned a record whose ${fieldName} is not an integer.`, {
+      field: fieldName,
+    });
+  }
+  return String(value);
+}
+
 /** How one upstream request should classify its failures. */
 interface RequestOptions {
   /** Map an upstream 404 onto `null` instead of letting it surface as a thrown NotFound. */
@@ -505,10 +550,11 @@ export class TvmazeService {
     timeZone: string,
     ctx: Context,
   ): Promise<Episode[] | null> {
-    const rows = await this.fetchJson<RawEpisode[]>(`/seasons/${seasonId}/episodes`, ctx, {
-      operation: 'tvmaze.getSeasonEpisodes',
-      notFoundAsNull: true,
-    });
+    const rows = await this.fetchJson<RawEpisode[]>(
+      `/seasons/${pathId(seasonId, 'season id')}/episodes`,
+      ctx,
+      { operation: 'tvmaze.getSeasonEpisodes', notFoundAsNull: true },
+    );
     return rows ? rows.map((row) => normalizeEpisode(row, timeZone)) : null;
   }
 

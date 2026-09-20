@@ -10,7 +10,11 @@ import { parseEnvConfig } from '@cyanheads/mcp-ts-core/config';
 
 const ServerConfigSchema = z.object({
   baseUrl: z
-    .url()
+    // Restricted to http(s): the value reaches `fetch` directly, and Bun
+    // resolves schemes like `file:` there, so an unrestricted URL would turn a
+    // config typo into a local read relayed to callers. A bad value fails at
+    // startup rather than on every request.
+    .url({ protocol: /^https?$/ })
     .default('https://api.tvmaze.com')
     .describe('TVmaze API base URL. Override to point at an enterprise endpoint.'),
   userAgent: z

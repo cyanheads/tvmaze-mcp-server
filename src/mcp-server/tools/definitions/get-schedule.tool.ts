@@ -10,7 +10,14 @@ import { paginateArray } from '@cyanheads/mcp-ts-core/utils';
 
 import { getTvmazeService, normalizeCountry, todayIn } from '@/services/tvmaze/tvmaze-service.js';
 import type { ScheduleEntry, ScheduleFeed } from '@/services/tvmaze/types.js';
-import { Episode, episodeLines, field, ShowSummary, showSummaryLines } from './shared-schemas.js';
+import {
+  Episode,
+  episodeLines,
+  field,
+  inline,
+  ShowSummary,
+  showSummaryLines,
+} from './shared-schemas.js';
 
 /** The highest page size the `limit` input allows, and the ceiling a cursor is clamped to. */
 const MAX_PAGE_SIZE = 250;
@@ -273,7 +280,7 @@ export const getSchedule = tool('tvmaze_get_schedule', {
       for (const entry of rows) {
         lines.push(
           '',
-          `### ${entry.show.name} — ${entry.name}`,
+          `### ${inline(`${entry.show.name} — ${entry.name}`)}`,
           field('feed', entry.feed),
           ...episodeLines(entry),
           ...showSummaryLines(entry.show),
