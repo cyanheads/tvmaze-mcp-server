@@ -1,6 +1,6 @@
 {
   "name": "@cyanheads/tvmaze-mcp-server",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "mcpName": "io.github.cyanheads/tvmaze-mcp-server",
   "description": "Search TVmaze shows, next episodes in your timezone, episode guides, daily TV schedules, and cast via MCP. STDIO or Streamable HTTP.",
   "type": "module",

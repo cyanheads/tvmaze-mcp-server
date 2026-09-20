@@ -1,7 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "tvmaze-mcp-server",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Search TVmaze shows, next episodes in your timezone, episode guides, daily TV schedules, and cast.",
   "author": {
     "name": "Casey Hand",

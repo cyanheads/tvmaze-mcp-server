@@ -1,6 +1,6 @@
 # tvmaze-mcp-server - Directory Structure
 
-Generated on: 2026-09-20 03:01:47
+Generated on: 2026-09-20 03:08:29
 
 ```text
 tvmaze-mcp-server/
@@ -24,6 +24,7 @@ tvmaze-mcp-server/
 │   ├── extensions.json
 │   └── settings.json
 ├── changelog/
+│   ├── 0.1.x/
 │   └── template.md
 ├── docs/
 │   └── design.md
@@ -179,6 +180,7 @@ tvmaze-mcp-server/
 ├── biome.json
 ├── bun.lock
 ├── bunfig.toml
+├── CHANGELOG.md
 ├── CLAUDE.md
 ├── devcheck.config.json
 ├── Dockerfile
