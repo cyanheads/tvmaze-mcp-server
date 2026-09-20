@@ -9,7 +9,7 @@
 
 import { runToolContract } from '@cyanheads/mcp-ts-core/testing';
 import { encodeCursor } from '@cyanheads/mcp-ts-core/utils';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { getSchedule } from '@/mcp-server/tools/definitions/get-schedule.tool.js';
 import {
@@ -162,14 +162,24 @@ describe('tvmaze_get_schedule', () => {
       respond: () => new Response('Too Many Requests', { status: 429 }),
     });
 
-    const result = await runToolContract(getSchedule, { date: '2026-09-18', country: 'US' });
-    expect(result.isError).toBe(true);
-    expect(errorEnvelope(result.structuredContent).error).toMatchObject({
-      data: { reason: 'schedule_unavailable', retryable: true },
-    });
-    const text = (result.content[0] as { text: string }).text;
-    expect(text).toContain('reason schedule_unavailable');
-  }, 25_000);
+    // Retry backoff, the pacer's 429 cooldown, and the retry deadline all run
+    // on real setTimeout/Date.now — fake timers collapse the ~14s of actual
+    // waiting to a few ticks of virtual time without changing what fires.
+    vi.useFakeTimers();
+    try {
+      const resultPromise = runToolContract(getSchedule, { date: '2026-09-18', country: 'US' });
+      await vi.advanceTimersByTimeAsync(35_000);
+      const result = await resultPromise;
+      expect(result.isError).toBe(true);
+      expect(errorEnvelope(result.structuredContent).error).toMatchObject({
+        data: { reason: 'schedule_unavailable', retryable: true },
+      });
+      const text = (result.content[0] as { text: string }).text;
+      expect(text).toContain('reason schedule_unavailable');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
   it('surfaces invalid_country typed on scope "all" instead of downgrading it to a partial-feed notice, even though the global web feed succeeds', async () => {
     const countryRejection = new Response(

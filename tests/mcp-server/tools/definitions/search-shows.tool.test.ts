@@ -6,7 +6,7 @@
  */
 
 import { runToolContract } from '@cyanheads/mcp-ts-core/testing';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { searchShows } from '@/mcp-server/tools/definitions/search-shows.tool.js';
 import { rawSearchHit, rawShow, rawShowSparse } from '../../../fixtures/tvmaze-fixtures.js';
@@ -94,13 +94,23 @@ describe('tvmaze_search_shows', () => {
       respond: () => new Response('Too Many Requests', { status: 429 }),
     });
 
-    const result = await runToolContract(searchShows, { query: 'always-down' });
-    expect(result.isError).toBe(true);
-    expect(errorEnvelope(result.structuredContent).error).toMatchObject({
-      data: { reason: 'search_unavailable', retryable: true },
-    });
-    const text = (result.content[0] as { text: string }).text;
-    expect(text).toContain('reason search_unavailable');
-    expect(text).toContain('Recovery:');
-  }, 25_000);
+    // Retry backoff, the pacer's 429 cooldown, and the retry deadline all run
+    // on real setTimeout/Date.now — fake timers collapse the ~14s of actual
+    // waiting to a few ticks of virtual time without changing what fires.
+    vi.useFakeTimers();
+    try {
+      const resultPromise = runToolContract(searchShows, { query: 'always-down' });
+      await vi.advanceTimersByTimeAsync(35_000);
+      const result = await resultPromise;
+      expect(result.isError).toBe(true);
+      expect(errorEnvelope(result.structuredContent).error).toMatchObject({
+        data: { reason: 'search_unavailable', retryable: true },
+      });
+      const text = (result.content[0] as { text: string }).text;
+      expect(text).toContain('reason search_unavailable');
+      expect(text).toContain('Recovery:');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
