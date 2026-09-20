@@ -123,6 +123,18 @@ describe('stripHtml / decodeHtmlEntities — contributor-authored content', () =
   it('keeps the newlines the paragraph and <br> conversions produce', () => {
     expect(stripHtml('<p>A</p>B<br>C')).toBe('A\n\nB\nC');
   });
+
+  it('does not let entity decoding reintroduce an element the tag pass removed', () => {
+    expect(stripHtml('<p>&lt;script&gt;alert(1)&lt;/script&gt;</p>')).toBe(
+      'script>alert(1)/script>',
+    );
+    expect(stripHtml('&#60;img src=x onerror=alert(1)&#62;')).toBe('img src=x onerror=alert(1)>');
+  });
+
+  it('keeps a prose comparison whose < is not an element name', () => {
+    expect(stripHtml('<p>a &lt; b and 2 &gt; 1</p>')).toBe('a < b and 2 > 1');
+    expect(stripHtml('rated &lt;3 by fans')).toBe('rated <3 by fans');
+  });
 });
 
 describe('normalizeCountry', () => {

@@ -98,21 +98,49 @@ export function decodeHtmlEntities(text: string): string {
   );
 }
 
+/** Any tag in the source markup, where every `<` is markup rather than prose. */
+const TAG = /<[^>]+>/g;
+
+/**
+ * A `<` that opens an element name, matched without its tag. It is removed from
+ * the *decoded* text, where the surrounding characters are prose: dropping the
+ * one character neutralizes the element while leaving a comparison like
+ * `a < b` — whose `<` is followed by a space — untouched.
+ */
+const ELEMENT_OPENER = /<(?=\/?[a-zA-Z])/g;
+
+/**
+ * Remove every match, then look again. One pass moves past the text it splices
+ * together, so a tag assembled out of two fragments survives it.
+ */
+function removeToFixpoint(text: string, pattern: RegExp): string {
+  let out = text;
+  for (let previous = ''; out !== previous; ) {
+    previous = out;
+    out = out.replace(pattern, '');
+  }
+  return out;
+}
+
 /**
  * Strip a community-authored TVmaze summary to plain text. The markup is a
  * closed set — `<p>`, `<b>`, `<i>`, `<em>`, `<strong>`, `<br>`, the occasional
  * `<a>` — so emphasis maps to its Markdown equivalent and everything else is
  * dropped. The prose itself is never rewritten or spell-corrected.
+ *
+ * Decoding is what makes the second pass necessary: `&lt;script&gt;` is not a
+ * tag while the tag pass runs and is one immediately after, so a summary could
+ * otherwise hand a live element to a client that renders this text as HTML.
  */
 export function stripHtml(html: string): string {
   if (!html) return '';
-  const text = html
+  const markup = html
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<\/p\s*>/gi, '\n\n')
     .replace(/<\/?(?:b|strong)(?:\s[^>]*)?>/gi, '**')
-    .replace(/<\/?(?:i|em)(?:\s[^>]*)?>/gi, '*')
-    .replace(/<[^>]+>/g, '');
-  return decodeHtmlEntities(text)
+    .replace(/<\/?(?:i|em)(?:\s[^>]*)?>/gi, '*');
+  return decodeHtmlEntities(removeToFixpoint(markup, TAG))
+    .replace(ELEMENT_OPENER, '')
     .replace(CONTROL_CHARACTERS, (character) =>
       character === '\n' || character === '\t' ? character : '',
     )
