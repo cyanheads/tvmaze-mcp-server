@@ -157,6 +157,8 @@ This server ships neither — everything is reachable through the seven tools, a
 ```ts
 // src/config/server-config.ts — lazy-parsed, separate from framework config.
 // Every variable is optional: TVmaze is keyless, so the server runs with nothing set.
+// Excerpt: three of the seven fields. userAgent, defaultCountry, maxConcurrency, and
+// requestTimeoutMs follow the same shape — the file is the source of truth.
 import { z } from '@cyanheads/mcp-ts-core';
 import { parseEnvConfig } from '@cyanheads/mcp-ts-core/config';
 
