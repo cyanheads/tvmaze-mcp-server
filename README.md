@@ -7,7 +7,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/Version-0.1.1-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/tvmaze-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-^2.0.0-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/tvmaze-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/tvmaze-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-^7.0.2-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.4.0-blueviolet.svg?style=flat-square)](https://bun.sh/)
+[![Version](https://img.shields.io/badge/Version-0.1.2-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/tvmaze-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-^2.0.0-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/tvmaze-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/tvmaze-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-^7.0.2-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.4.0-blueviolet.svg?style=flat-square)](https://bun.sh/)
 
 </div>
 
@@ -19,11 +19,17 @@
 
 </div>
 
+<div align="center">
+
+**Public Hosted Server:** [https://tvmaze.caseyjhand.com/mcp](https://tvmaze.caseyjhand.com/mcp)
+
+</div>
+
 ---
 
 ## Overview
 
-Television data from TVmaze — a community-maintained database of series, episodes, air times, and credits, served by a keyless public API. Find a show by title or by its IMDb, TheTVDB, or TVRage id, then read its profile, season episode guides, and cast, or ask when the next episode airs in a viewer's timezone. A whole date works as the starting point too: what a country's networks broadcast that day, what the global streaming services released, or both merged. Runs as a stdio process or a local Streamable HTTP server.
+Television data from TVmaze — a community-maintained database of series, episodes, air times, and credits, served by a keyless public API. Find a show by title or by its IMDb, TheTVDB, or TVRage id, then read its profile, season episode guides, and cast, or ask when the next episode airs in a viewer's timezone. A whole date works as the starting point too: what a country's networks broadcast that day, what the global streaming services released, or both merged. Runs as a stdio process, a local Streamable HTTP server, or the public hosted endpoint above.
 
 ### Tools
 
@@ -124,6 +130,23 @@ Data comes from [TVmaze](https://www.tvmaze.com) and is licensed **CC BY-SA**. C
 TVmaze rate-limits to at least 20 calls every 10 seconds per IP address and answers a burst past that with HTTP 429; the server paces itself under that budget and backs off when one arrives. Upstream caches its output for 60 minutes, so a schedule change or a newly announced episode can take up to an hour to appear; the local response cache (`TVMAZE_CACHE_TTL_S`, default 300 s) sits well inside that window.
 
 ## Getting started
+
+### Public Hosted Instance
+
+A public instance is available at `https://tvmaze.caseyjhand.com/mcp` — no installation required. Point any MCP client at it via Streamable HTTP:
+
+```json
+{
+  "mcpServers": {
+    "tvmaze-mcp-server": {
+      "type": "streamable-http",
+      "url": "https://tvmaze.caseyjhand.com/mcp"
+    }
+  }
+}
+```
+
+### Self-Hosted / Local
 
 Add the following to your MCP client configuration file. No API key is required.
 
