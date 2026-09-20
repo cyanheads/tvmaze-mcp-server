@@ -11,19 +11,6 @@
 
 ---
 
-## First Session
-
-This project was just scaffolded with `bunx @cyanheads/mcp-ts-core init`. You're holding a production-grade MCP framework with the hard parts already solved — error handling, telemetry, auth, transport, validation, lifecycle. What's missing is the **domain**. Your job: design the tool, resource, and service surface with the user, then implement it as small pure handlers that throw — the framework catches, classifies, and instruments the rest. Design before code; the user's first messages set direction, so wait for them before scaffolding definitions.
-
-> **Remove this section** from CLAUDE.md / AGENTS.md after completing these steps. The skills and conventions below remain — this block is one-time onboarding only.
-
-1. **Get your bearings.** Take stock of the project tree, the skills in `framework-skills/`, and the tools/MCP servers available. Light tool use is fine for context-building — you're mapping the territory, not committing yet.
-2. **Read the framework docs** — `node_modules/@cyanheads/mcp-ts-core/CLAUDE.md` (builders, Context, errors, exports, conventions)
-3. **Run the `setup` skill** — read `framework-skills/setup/SKILL.md` and follow its checklist (project orientation, agent protocol file selection, echo definition cleanup, skill sync)
-4. **Design the server** — read `framework-skills/design-mcp-server/SKILL.md` and work through it with the user to map the domain into tools, resources, and services before scaffolding
-
----
-
 ## What's Next?
 
 When the user asks what's next or needs direction, suggest options based on the current project state. Common next steps:
@@ -59,101 +46,156 @@ Tailor suggestions to what's actually missing or stale — don't recite the full
 
 ### Tool
 
+Trimmed from `src/mcp-server/tools/definitions/search-shows.tool.ts` — the file is the source of truth; the notice branches are condensed here. It is the fullest example on the surface: a service call, a typed error contract, enrichment, and `format()`.
+
 ```ts
 import { tool, z } from '@cyanheads/mcp-ts-core';
+import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
 
-export const searchItems = tool('search_items', {
-  description: 'Search inventory items by query.',
-  annotations: { readOnlyHint: true },
+import { getTvmazeService } from '@/services/tvmaze/tvmaze-service.js';
+import { field, ShowSummary, showSummaryLines, yearRange } from './shared-schemas.js';
+
+/** The source's fixed ceiling on `/search/shows`. There is no paging past it. */
+const SEARCH_RESULT_CAP = 10;
+
+export const searchShows = tool('tvmaze_search_shows', {
+  description:
+    'Search television shows by title and return up to 10 matches, each with its network or streaming service, production status, genres, rating, and ids in other catalogs. Matching is fuzzy, so small typos still resolve. The result set is hard-capped at 10 by the source and cannot be paged — narrow the title to reach an eleventh match. To go the other way, from an IMDb or TheTVDB id to a show, use tvmaze_lookup_show.',
+  annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
+
+  errors: [
+    {
+      reason: 'search_unavailable',
+      code: JsonRpcErrorCode.ServiceUnavailable,
+      when: 'TVmaze search did not respond after retries.',
+      recovery:
+        'Wait a few seconds and call tvmaze_search_shows again; the source rate-limits search requests.',
+      retryable: true,
+      thrownBy: 'service',
+    },
+  ],
+
   input: z.object({
-    query: z.string().describe('Search terms'),
-    limit: z.number().default(10).describe('Max results'),
+    query: z
+      .string()
+      .min(1)
+      .describe(
+        'Show title or title fragment. Matched fuzzily against every show title in the database, so minor misspellings still resolve.',
+      ),
   }),
+
   output: z.object({
-    items: z.array(z.object({
-      id: z.string().describe('Item ID'),
-      name: z.string().describe('Item name'),
-    })).describe('Matching items'),
+    shows: z
+      .array(
+        ShowSummary.extend({
+          match_score: z
+            .number()
+            .describe(
+              'Relevance score assigned by the source search. Higher is a closer title match; values are comparable only within one result set.',
+            ),
+        }).describe('A matching show with the relevance score the source assigned it.'),
+      )
+      .describe('Matching shows, best match first. At most 10.'),
   }),
-  auth: ['inventory:read'],
+
+  enrichment: {
+    effectiveQuery: z.string().describe('The query as submitted upstream.'),
+    truncated: z
+      .boolean()
+      .optional()
+      .describe("True when the source's fixed ten-result ceiling was reached."),
+    shown: z.number().optional().describe('Number of shows returned.'),
+    cap: z.number().optional().describe('The result ceiling the source applied.'),
+    notice: z.string().optional().describe('Guidance when nothing matched or the ceiling was hit.'),
+  },
 
   async handler(input, ctx) {
-    const items = await findItems(input.query, input.limit);
-    ctx.log.info('Search completed', { query: input.query, count: items.length });
-    return { items };
+    const shows = await getTvmazeService().searchShows(input.query, ctx);
+    ctx.log.info('Show search completed', { query: input.query, matches: shows.length });
+
+    ctx.enrich.echo(input.query);
+    if (shows.length === SEARCH_RESULT_CAP) {
+      ctx.enrich.truncated({ shown: shows.length, cap: SEARCH_RESULT_CAP });
+      ctx.enrich.notice('The source caps this search at 10 results and offers no pagination. …');
+    }
+
+    return { shows };
   },
 
   // format() populates content[] — the markdown twin of structuredContent.
   // Different clients read different surfaces (Claude Code → structuredContent,
   // Claude Desktop → content[]); both must carry the same data.
   // Enforced at lint time: every field in `output` must appear in the rendered text.
-  format: (result) => [{
-    type: 'text',
-    text: result.items.map(i => `**${i.id}**: ${i.name}`).join('\n'),
-  }],
-});
-```
-
-### Resource
-
-```ts
-import { resource, z } from '@cyanheads/mcp-ts-core';
-import { notFound } from '@cyanheads/mcp-ts-core/errors';
-
-export const itemData = resource('inventory://{itemId}', {
-  description: 'Fetch an inventory item by ID.',
-  params: z.object({ itemId: z.string().describe('Item identifier') }),
-  auth: ['inventory:read'],
-  async handler(params, ctx) {
-    const item = await ctx.state.get(`item/${params.itemId}`);
-    if (!item) throw notFound(`Item ${params.itemId} not found`, { itemId: params.itemId });
-    return item;
+  format: (result) => {
+    const lines: string[] = [`**${result.shows.length} shows**`];
+    for (const show of result.shows) {
+      lines.push(
+        '',
+        `### ${show.name} (${yearRange(show)})`,
+        field('match_score', show.match_score),
+        ...showSummaryLines(show),
+      );
+    }
+    return [{ type: 'text', text: lines.join('\n') }];
   },
 });
 ```
 
-### Prompt
+Conventions this surface holds to, and that a new tool inherits:
 
-```ts
-import { prompt, z } from '@cyanheads/mcp-ts-core';
+- **Output shapes are shared, error contracts are not.** `ShowSummary`, `Episode`, `Season`, and `CastCredit` — plus the `format()` renderers that keep them at parity — live in `shared-schemas.ts`. Each tool declares its own `errors[]` inline; per-tool repetition is the intended cost of locality.
+- **No tool declares `auth` scopes.** Every tool reads public data from a keyless API and the deployment posture is `MCP_AUTH_MODE=none`. A deployment that later enables JWT adds one `tool:<name>:read` scope per tool then.
+- **An absent optional value renders as `Not available`**, never `0`, `""`, or a dropped line — that is what keeps `format-parity` holding on TVmaze's sparse records.
+- **A hit-or-miss result is one flat `z.object` with optional fields**, never a `z.discriminatedUnion` (`tool()` rejects a union as an output root), and `format()` renders each arm from its own `if` block.
 
-export const reviewCode = prompt('review_code', {
-  description: 'Review code for issues and best practices.',
-  args: z.object({
-    code: z.string().describe('Code to review'),
-    language: z.string().optional().describe('Programming language'),
-  }),
-  generate: (args) => [
-    { role: 'user', content: { type: 'text', text: `Review this ${args.language ?? ''} code:\n${args.code}` } },
-  ],
-});
-```
+### Resource / Prompt
+
+This server ships neither — everything is reachable through the seven tools, a `tvmaze://shows/{id}` resource would only mirror `tvmaze_get_show` while demanding the one thing a caller starting from a title lacks, and the domain has no recurring interaction worth templating (`docs/design.md` § Design Decisions). If that changes, the `add-resource` and `add-prompt` skills carry the current patterns — don't hand-write one from memory.
 
 ### Server config
 
 ```ts
-// src/config/server-config.ts — lazy-parsed, separate from framework config
+// src/config/server-config.ts — lazy-parsed, separate from framework config.
+// Every variable is optional: TVmaze is keyless, so the server runs with nothing set.
 import { z } from '@cyanheads/mcp-ts-core';
 import { parseEnvConfig } from '@cyanheads/mcp-ts-core/config';
 
 const ServerConfigSchema = z.object({
-  apiKey: z.string().describe('External API key'),
-  maxResults: z.coerce.number().default(100),
-  verboseLogging: z.stringbool().default(false).describe('Enable verbose logging'),
+  baseUrl: z
+    .url()
+    .default('https://api.tvmaze.com')
+    .describe('TVmaze API base URL. Override to point at an enterprise endpoint.'),
+  defaultTimezone: z
+    .string()
+    .min(1)
+    .default('UTC')
+    .describe('IANA timezone used when a tool call omits `timezone`.'),
+  cacheTtlS: z.coerce
+    .number()
+    .int()
+    .min(0)
+    .default(300)
+    .describe('Seconds to hold an upstream response in the in-process cache. 0 disables caching.'),
 });
 
-let _config: z.infer<typeof ServerConfigSchema> | undefined;
-export function getServerConfig() {
+export type ServerConfig = z.infer<typeof ServerConfigSchema>;
+
+let _config: ServerConfig | undefined;
+
+/** Lazily parse and memoize the server's own environment configuration. */
+export function getServerConfig(): ServerConfig {
   _config ??= parseEnvConfig(ServerConfigSchema, {
-    apiKey: 'MY_API_KEY',
-    maxResults: 'MY_MAX_RESULTS',
-    verboseLogging: 'MY_VERBOSE_LOGGING',
+    baseUrl: 'TVMAZE_BASE_URL',
+    defaultTimezone: 'TVMAZE_DEFAULT_TIMEZONE',
+    cacheTtlS: 'TVMAZE_CACHE_TTL_S',
   });
   return _config;
 }
 ```
 
-`parseEnvConfig` maps Zod schema paths → env var names so errors name the variable (`MY_API_KEY`) not the path (`apiKey`). Throws `ConfigurationError`, which the framework prints as a clean startup banner.
+`parseEnvConfig` maps Zod schema paths → env var names so errors name the variable (`TVMAZE_BASE_URL`) not the path (`baseUrl`). Throws `ConfigurationError`, which the framework prints as a clean startup banner.
+
+Adding a variable means four files, not one: the schema above, `.env.example`, `server.json` (`environmentVariables[]`), and `manifest.json` (`mcp_config.env` + `user_config`, mirrored into `.claude-plugin/plugin.json`'s `userConfig` and `.codex-plugin/mcp.json`'s `env_vars`). `lint:packaging` fails on a mismatch.
 
 For env booleans use `z.stringbool()`, never `z.coerce.boolean()` — `Boolean("false")` is `true`, so a coerced flag can't be disabled through the environment. `z.stringbool()` parses `true/false/1/0/yes/no/on/off` and rejects anything else, so `=false` actually disables.
 
@@ -162,15 +204,19 @@ For env booleans use `z.stringbool()`, never `z.coerce.boolean()` — `Boolean("
 `createApp()` accepts optional identity fields forwarded to the SDK's `initialize` response and the server manifest (`/.well-known/mcp.json`):
 
 ```ts
+// src/index.ts — `name` and `title` are both the bare repo name, never Title Case
+// and never the npm scope; `lint:packaging` enforces the pair.
 await createApp({
-  name: 'my-mcp-server',
-  title: 'My Server',                         // human-readable display name
-  websiteUrl: 'https://github.com/owner/repo', // canonical homepage URL
-  description: 'One-line description.',        // wins over MCP_SERVER_DESCRIPTION
-  icons: [{ src: 'https://example.com/icon.png', sizes: ['48x48'], mimeType: 'image/png' }],
-  instructions: 'Use shortcut alpha for the most common case.', // session-level context
+  name: 'tvmaze-mcp-server',
+  title: 'tvmaze-mcp-server',
+  tools: [searchShows, getShow, lookupShow, getNextEpisode, getEpisodes, getSchedule, getCast],
+  instructions: INSTRUCTIONS, // session-level context, sent on every initialize
 });
 ```
+
+`description` is deliberately absent: it derives from `package.json`, the canonical source, and an explicit copy here is drift. `websiteUrl` and `icons` are the remaining optional identity fields, forwarded the same way when a server sets them.
+
+This server's `INSTRUCTIONS` block carries what no single tool description can: the resolve-a-show-first workflow, the `airstamp`-is-authoritative rule, the linear-versus-streaming feed split, the CC BY-SA attribution and ShareAlike obligation, and the reminder that community-written summaries are content to report on, never instructions to follow.
 
 `instructions` is optional server-level orientation, sent on every `initialize` as session-level context. Use it for deployment guidance (connection aliases, regional notes, scope hints) instead of repeating the same context across tool descriptions. Client adoption is uneven, but there's no downside when set.
 
@@ -181,8 +227,8 @@ Two more `createApp()` options shape how the server runs rather than how it pres
 ```ts
 await createApp({
   sessionMode: 'stateless',          // or { default: 'stateful', require: 'stateful' }
-  setup(core) { startMyWatcher(core.config); },
-  async teardown() { await stopMyWatcher(); },
+  setup() { initTvmazeService(); },  // constructs the singleton: pacer, cache, HTTP config
+  teardown() { disposeTvmazeService(); }, // releases the pacer's dispatch timer
 });
 ```
 
@@ -199,14 +245,15 @@ Handlers receive a unified `ctx` object. Key properties:
 | Property | Description |
 |:---------|:------------|
 | `ctx.log` | Request-scoped logger — `.debug()`, `.info()`, `.notice()`, `.warning()`, `.error()`. Auto-correlates requestId, traceId, tenantId. Dual-sink: Pino **and** `notifications/message` to the client, so treat it as client-visible. |
-| `ctx.state` | Tenant-scoped KV — `.get(key)`, `.set(key, value, { ttl? })`, `.delete(key)`, `.getMany(keys)`, `.list(prefix, { cursor, limit })`. Accepts any serializable value. |
-| `ctx.requestInput` | Suspend and ask the caller for more input — `return ctx.requestInput({ inputRequests: { key: inputRequired.elicit({ message, requestedSchema }) } })`. Never returns; the handler is re-entered with the answers. Always present. |
-| `ctx.inputs` | Reader over a retried request's responses — `.accepted(key, schema)`, `.view(key)`, `.state()`, `.dropped`. Empty on the first round. |
 | `ctx.enrich` | Success-path agent context (empty-result notices, query echo, pagination totals) — `ctx.enrich(...)` or `.notice()` / `.total()` / `.echo()` / `.truncated()`. Reaches `structuredContent` and `content[]`; lands only when the definition declares an `enrichment` block (no-op otherwise). |
-| `ctx.content` | Non-text content blocks — `.image(data, mimeType)`, `.audio(data, mimeType)`, or `ctx.content(block)` for a raw block. Prepended to `content[]` after `format()`; never enters `structuredContent`. |
-| `ctx.signal` | `AbortSignal` for cancellation. |
+| `ctx.fail` / `ctx.recoveryFor` | Typed throw against the tool's own `errors[]` reason union, and the declared recovery hint to forward as the throw's data. See Errors. |
+| `ctx.signal` | `AbortSignal` for cancellation — handed to `withRetry` and `fetchWithTimeout` inside `TvmazeService`. |
 | `ctx.requestId` | Unique request ID. |
 | `ctx.tenantId` | Tenant ID from JWT; `'default'` for stdio or HTTP with auth off. |
+
+**What this server deliberately does not use.** `ctx.state` is tenant-scoped by design, which is right for tenant data and wrong for this cache: TVmaze responses are public and identical for every tenant, and the reason to cache them is to collapse identical bursts onto one shared egress rate budget — a tenant-scoped store would hold N copies and collapse nothing. The response cache therefore lives in `TvmazeService`. Tenant data, if any is ever stored, still goes through `ctx.state` and never straight to persistence.
+
+`ctx.requestInput` / `ctx.inputs` are unused — no handler asks the caller for input mid-flight, which is why `createApp()` can declare a plain `sessionMode: 'stateless'` rather than `require: 'stateful'`. Adding an elicitation to any tool means revisiting that declaration. `ctx.content` is unused as well: every response is text plus `structuredContent`, and image URLs are returned as fields, not as image blocks. The framework CLAUDE.md carries the full signatures for all four.
 
 ---
 
@@ -220,16 +267,23 @@ Handlers throw — the framework catches, classifies, and formats.
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
 
 errors: [
-  { reason: 'no_match', code: JsonRpcErrorCode.NotFound,
-    when: 'No item matched the query',
-    recovery: 'Broaden the query or check the spelling and try again.' },
+  { reason: 'show_not_found', code: JsonRpcErrorCode.NotFound,
+    when: 'No show exists with the given TVmaze id.',
+    recovery: 'Call tvmaze_search_shows with the show title to find a valid TVmaze id, or tvmaze_lookup_show with an IMDb or TheTVDB id.' },
 ],
 async handler(input, ctx) {
-  const item = await db.find(input.id);
-  if (!item) throw ctx.fail('no_match', `No item ${input.id}`, ctx.recoveryFor('no_match'));
-  return item;
+  const detail = await getTvmazeService().getShowDetail(input.show_id, timezone, ctx, { seasons: true });
+  if (!detail) {
+    throw ctx.fail('show_not_found', `No TVmaze show has id ${input.show_id}.`, {
+      show_id: input.show_id,
+      ...ctx.recoveryFor('show_not_found'),
+    });
+  }
+  return { ...detail, timezone };
 }
 ```
+
+**A 404 becomes `null` in the service, not a throw.** Every by-id fetch method returns `T | null`, so the handler decides what a miss means — a typed `ctx.fail` where the caller supplied an id, or a `{ found: false, guidance }` result where resolving an identifier was the tool's whole job (`tvmaze_lookup_show`, the title arm of `tvmaze_get_next_episode`). That keeps every `ctx.fail` lexically inside a handler, the only place the `error-contract-unthrown` and `error-contract-recovery-unforwarded` lints can see it. Where the service must throw from below a handler — an upstream 422, an unknown IANA zone — it re-throws through an error factory carrying the calling tool's `reason` plus `ctx.recoveryFor(reason)`, and the matching contract entry carries `thrownBy: 'service'`.
 
 **Declare contracts inline on each tool.** The contract is part of the tool's public surface — one file should give the full picture. Don't extract a shared `errors[]` constant; per-tool repetition is the intended cost of locality.
 
@@ -258,20 +312,17 @@ See framework CLAUDE.md and the `api-errors` skill for the full auto-classificat
 
 ```text
 src/
-  index.ts                              # createApp() entry point
+  index.ts                              # createApp() entry point — seven tools, instructions, service lifecycle
   config/
-    server-config.ts                    # Server-specific env vars (Zod schema)
+    server-config.ts                    # TVMAZE_* env vars (Zod schema)
   services/
-    [domain]/
-      [domain]-service.ts               # Domain service (init/accessor pattern)
-      types.ts                          # Domain types
+    tvmaze/
+      tvmaze-service.ts                 # TVmaze REST client — pacer, cache, normalizers (init/accessor pattern)
+      types.ts                          # Raw upstream shapes + normalized domain types
   mcp-server/
     tools/definitions/
-      [tool-name].tool.ts               # Tool definitions
-    resources/definitions/
-      [resource-name].resource.ts       # Resource definitions
-    prompts/definitions/
-      [prompt-name].prompt.ts           # Prompt definitions
+      [tool-name].tool.ts               # Tool definitions (one per tvmaze_* tool)
+      shared-schemas.ts                 # Output schemas + format() renderers shared across tools
 ```
 
 ---
@@ -280,10 +331,10 @@ src/
 
 | What | Convention | Example |
 |:-----|:-----------|:--------|
-| Files | kebab-case with suffix | `search-docs.tool.ts` |
-| Tool/resource/prompt names | snake_case | `search_docs` |
-| Directories | kebab-case | `src/services/doc-search/` |
-| Descriptions | Single string or template literal, no `+` concatenation | `'Search items by query and filter.'` |
+| Files | kebab-case with suffix | `search-shows.tool.ts` |
+| Tool/resource/prompt names | snake_case, `tvmaze_` prefix | `tvmaze_search_shows` |
+| Directories | kebab-case | `src/services/tvmaze/` |
+| Descriptions | Single string or template literal, no `+` concatenation | `'List a show’s episodes with air times, runtimes, and synopses.'` |
 
 ---
 
@@ -417,7 +468,10 @@ import { tool, z } from '@cyanheads/mcp-ts-core';
 import { McpError, JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
 
 // Server's own code — via path alias
-import { getMyService } from '@/services/my-domain/my-service.js';
+import { getTvmazeService } from '@/services/tvmaze/tvmaze-service.js';
+
+// A sibling inside the same definitions directory — relative, not aliased
+import { Episode, episodeLines, field } from './shared-schemas.js';
 ```
 
 ---
@@ -427,7 +481,8 @@ import { getMyService } from '@/services/my-domain/my-service.js';
 - [ ] Zod schemas: all fields have `.describe()`, only JSON-Schema-serializable types (no `z.custom()`, `z.date()`, `z.transform()`, `z.bigint()`, `z.symbol()`, `z.void()`, `z.map()`, `z.set()`, `z.function()`, `z.nan()`)
 - [ ] Optional nested objects: handler guards for empty inner values from form-based clients (`if (input.obj?.field && ...)`, not just `if (input.obj)`). When regex/length constraints matter, use `z.union([z.literal(''), z.string().regex(...).describe(...)])` — literal variants are exempt from `describe-on-fields`.
 - [ ] JSDoc `@fileoverview` + `@module` on every file
-- [ ] `ctx.log` for logging, `ctx.state` for storage
+- [ ] `ctx.log` for logging — no `console`; every upstream call goes through `TvmazeService`, never `fetch` from a handler
+- [ ] Air times derived from `airstamp` only, never `airdate` + `airtime`; a record with no announced time reports `time_known: false` and no `local_time`
 - [ ] Handlers throw on failure — error factories or plain `Error`, no try/catch
 - [ ] `format()` renders all data the LLM needs — different clients forward different surfaces (Claude Code → `structuredContent`, Claude Desktop → `content[]`); both must carry the same data
 - [ ] If wrapping external API: raw/domain/output schemas reviewed against real upstream sparsity/nullability before finalizing required vs optional fields

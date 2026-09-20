@@ -1,8 +1,9 @@
 {
   "manifest_version": "0.3",
   "name": "tvmaze-mcp-server",
+  "display_name": "tvmaze-mcp-server",
   "version": "0.1.0",
-  "description": "Television series and episode schedules — search shows, next episodes in your timezone, episode guides, daily broadcast and streaming schedules, and cast via TVmaze.",
+  "description": "Search TVmaze shows, next episodes in your timezone, episode guides, daily TV schedules, and cast via MCP. STDIO or Streamable HTTP.",
   "author": {
     "name": "cyanheads",
     "email": "casey@caseyjhand.com",

@@ -7,6 +7,15 @@
     ],
     "env": {
       "MCP_TRANSPORT_TYPE": "stdio"
-    }
+    },
+    "env_vars": [
+      "TVMAZE_BASE_URL",
+      "TVMAZE_USER_AGENT",
+      "TVMAZE_DEFAULT_TIMEZONE",
+      "TVMAZE_DEFAULT_COUNTRY",
+      "TVMAZE_CACHE_TTL_S",
+      "TVMAZE_MAX_CONCURRENCY",
+      "TVMAZE_REQUEST_TIMEOUT_MS"
+    ]
   }
 }

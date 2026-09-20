@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "tvmaze-mcp-server",
   "version": "0.1.0",
-  "description": "Television series and episode schedules — search shows, next episodes in your timezone, episode guides, daily broadcast and streaming schedules, and cast via TVmaze.",
+  "description": "Search TVmaze shows, next episodes in your timezone, episode guides, daily TV schedules, and cast.",
   "author": {
     "name": "Casey Hand",
     "email": "casey@caseyjhand.com",
@@ -21,6 +21,50 @@
     "episodes",
     "tv-schedule"
   ],
+  "userConfig": {
+    "TVMAZE_BASE_URL": {
+      "type": "string",
+      "title": "TVmaze Base URL",
+      "description": "TVmaze API base URL. Override to point at an enterprise endpoint.",
+      "default": "https://api.tvmaze.com"
+    },
+    "TVMAZE_USER_AGENT": {
+      "type": "string",
+      "title": "User Agent",
+      "description": "User-Agent sent on every upstream request. TVmaze asks that clients identify themselves. Leave blank to use the server name, version, and repository URL.",
+      "default": ""
+    },
+    "TVMAZE_DEFAULT_TIMEZONE": {
+      "type": "string",
+      "title": "Default Timezone",
+      "description": "IANA timezone used when a tool call omits the timezone argument (e.g. America/Los_Angeles).",
+      "default": "UTC"
+    },
+    "TVMAZE_DEFAULT_COUNTRY": {
+      "type": "string",
+      "title": "Default Country",
+      "description": "ISO 3166-1 alpha-2 country used for schedule scopes linear and all when country is omitted.",
+      "default": "US"
+    },
+    "TVMAZE_CACHE_TTL_S": {
+      "type": "string",
+      "title": "Cache TTL (seconds)",
+      "description": "Seconds to hold an upstream response in the in-process cache. 0 disables caching.",
+      "default": "300"
+    },
+    "TVMAZE_MAX_CONCURRENCY": {
+      "type": "string",
+      "title": "Max Concurrency",
+      "description": "Concurrent upstream requests.",
+      "default": "4"
+    },
+    "TVMAZE_REQUEST_TIMEOUT_MS": {
+      "type": "string",
+      "title": "Request Timeout (ms)",
+      "description": "Per-request timeout in milliseconds.",
+      "default": "10000"
+    }
+  },
   "mcpServers": {
     "tvmaze-mcp-server": {
       "command": "npx",
@@ -29,7 +73,14 @@
         "@cyanheads/tvmaze-mcp-server"
       ],
       "env": {
-        "MCP_TRANSPORT_TYPE": "stdio"
+        "MCP_TRANSPORT_TYPE": "stdio",
+        "TVMAZE_BASE_URL": "${user_config.TVMAZE_BASE_URL}",
+        "TVMAZE_USER_AGENT": "${user_config.TVMAZE_USER_AGENT}",
+        "TVMAZE_DEFAULT_TIMEZONE": "${user_config.TVMAZE_DEFAULT_TIMEZONE}",
+        "TVMAZE_DEFAULT_COUNTRY": "${user_config.TVMAZE_DEFAULT_COUNTRY}",
+        "TVMAZE_CACHE_TTL_S": "${user_config.TVMAZE_CACHE_TTL_S}",
+        "TVMAZE_MAX_CONCURRENCY": "${user_config.TVMAZE_MAX_CONCURRENCY}",
+        "TVMAZE_REQUEST_TIMEOUT_MS": "${user_config.TVMAZE_REQUEST_TIMEOUT_MS}"
       }
     }
   }

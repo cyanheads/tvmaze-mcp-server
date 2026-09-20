@@ -1,7 +1,7 @@
 {
   "name": "tvmaze-mcp-server",
   "version": "0.1.0",
-  "description": "Television series and episode schedules — search shows, next episodes in your timezone, episode guides, daily broadcast and streaming schedules, and cast via TVmaze.",
+  "description": "Search TVmaze shows, next episodes in your timezone, episode guides, daily TV schedules, and cast.",
   "author": {
     "name": "Casey Hand",
     "email": "casey@caseyjhand.com",
@@ -23,8 +23,8 @@
   "mcpServers": "./.codex-plugin/mcp.json",
   "interface": {
     "displayName": "tvmaze-mcp-server",
-    "shortDescription": "Television series, episode guides, next-episode lookup, and daily TV schedules via TVmaze.",
-    "longDescription": "Television series and episode schedules — search shows, next episodes in your timezone, episode guides, daily broadcast and streaming schedules, and cast via TVmaze.",
+    "shortDescription": "Search TVmaze shows, next episodes in your timezone, episode guides, daily TV schedules, and cast.",
+    "longDescription": "Search TVmaze shows, next episodes in your timezone, episode guides, daily TV schedules, and cast via MCP. STDIO or Streamable HTTP.",
     "developerName": "cyanheads",
     "category": "data",
     "capabilities": [
