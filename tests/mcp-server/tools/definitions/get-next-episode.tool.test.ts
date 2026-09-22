@@ -50,6 +50,8 @@ describe('tvmaze_get_next_episode', () => {
     const text = (result.content[0] as { text: string }).text;
     expect(text).toContain('## Next: Next Up');
     expect(text).toContain('## Previously');
+    expect(text).not.toContain('**No scheduled episode**');
+    expect(text).not.toContain('**Show not found**');
   });
 
   it('resolves by title via singlesearch', async () => {
@@ -85,6 +87,7 @@ describe('tvmaze_get_next_episode', () => {
     });
     const text = (result.content[0] as { text: string }).text;
     expect(text).toContain('**No scheduled episode**');
+    expect(text).not.toContain('**Show not found**');
     expect(text).toContain('## Previously');
   });
 
@@ -105,6 +108,9 @@ describe('tvmaze_get_next_episode', () => {
       guidance: expect.stringContaining('No show matched "zzzz nonexistent"'),
     });
     expect(result.structuredContent).not.toHaveProperty('show');
+    const text = (result.content[0] as { text: string }).text;
+    expect(text).toContain('**Show not found**');
+    expect(text).not.toContain('**No scheduled episode**');
   });
 
   it('throws show_not_found_by_id for a bad id (a supplied id is the caller’s to fix)', async () => {

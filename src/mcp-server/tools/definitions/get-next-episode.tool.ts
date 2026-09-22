@@ -152,7 +152,8 @@ export const getNextEpisode = tool('tvmaze_get_next_episode', {
     const lines: string[] = [
       `${field('found', result.found)} | ${field('miss_reason', result.miss_reason)} | ${field('timezone', result.timezone)}`,
     ];
-    if (!result.found) lines.push('**No scheduled episode**');
+    if (result.miss_reason === 'show_not_found') lines.push('**Show not found**');
+    if (result.miss_reason === 'no_scheduled_episode') lines.push('**No scheduled episode**');
     if (result.guidance) lines.push(field('guidance', result.guidance));
     if (result.next_episode) {
       lines.push(
