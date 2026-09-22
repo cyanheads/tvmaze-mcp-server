@@ -6,21 +6,18 @@
 
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
-import { paginateArray } from '@cyanheads/mcp-ts-core/utils';
 
 import { getTvmazeService, normalizeCountry, todayIn } from '@/services/tvmaze/tvmaze-service.js';
 import type { ScheduleEntry, ScheduleFeed } from '@/services/tvmaze/types.js';
+import { DEFAULT_PAGE_SIZE, enrichPage, MAX_PAGE_SIZE, pageOf } from './paging.js';
 import {
   Episode,
   episodeLines,
   field,
   inline,
-  ShowSummary,
-  showSummaryLines,
+  ScheduleShow,
+  scheduleShowLines,
 } from './shared-schemas.js';
-
-/** The highest page size the `limit` input allows, and the ceiling a cursor is clamped to. */
-const MAX_PAGE_SIZE = 250;
 
 export const getSchedule = tool('tvmaze_get_schedule', {
   description:
@@ -95,21 +92,25 @@ export const getSchedule = tool('tvmaze_get_schedule', {
       .int()
       .min(1)
       .max(MAX_PAGE_SIZE)
-      .default(50)
+      .default(DEFAULT_PAGE_SIZE)
       .describe(
-        'Maximum entries to return in one call. A full day in one country runs to roughly 50 broadcast entries and over 120 global streaming entries.',
+        'Maximum entries to return in this call. Applies to every page, including a call that passes cursor. A full day in one country runs to roughly 50 broadcast entries and over 120 global streaming entries.',
       ),
     cursor: z
       .string()
       .optional()
-      .describe('Continuation token from a previous call’s next_cursor. Omit for the first page.'),
+      .describe(
+        'Continuation token from a previous call’s next_cursor. It carries only the position to resume from; the page size comes from limit. Omit for the first page.',
+      ),
   }),
 
   output: z.object({
     entries: z
       .array(
         Episode.extend({
-          show: ShowSummary.describe('The show this episode belongs to.'),
+          show: ScheduleShow.describe(
+            'The show this episode belongs to, as a compact reference: identity, type, genres, and channel. Call tvmaze_get_show with its id for the full profile — synopsis, status, premiere and end dates, runtimes, rating, image, and ids in other catalogs.',
+          ),
           feed: z
             .enum(['linear', 'streaming'])
             .describe(
@@ -136,12 +137,12 @@ export const getSchedule = tool('tvmaze_get_schedule', {
     totalCount: z.number().describe('Merged entry count before the page limit was applied.'),
     truncated: z.boolean().optional().describe('True when the page limit was reached.'),
     shown: z.number().optional().describe('Number of entries returned on this page.'),
-    cap: z.number().optional().describe('The page limit that was applied.'),
+    cap: z.number().optional().describe('The page size applied to this call — its limit.'),
     notice: z
       .string()
       .optional()
       .describe(
-        'Guidance when nothing is listed, or when one feed of a merged query did not respond. Absent otherwise.',
+        'Guidance when the page was truncated, when nothing is listed, or when one feed of a merged query did not respond — every one that applies, joined. Absent otherwise.',
       ),
   },
 
@@ -221,7 +222,7 @@ export const getSchedule = tool('tvmaze_get_schedule', {
     }
     merged.sort((a, b) => (Date.parse(a.airstamp) || 0) - (Date.parse(b.airstamp) || 0));
 
-    const page = paginateArray(merged, input.cursor, input.limit, MAX_PAGE_SIZE, ctx);
+    const page = pageOf(merged, input.cursor, input.limit, ctx);
     ctx.log.info('Schedule fetched', {
       date,
       feeds: succeeded,
@@ -230,10 +231,6 @@ export const getSchedule = tool('tvmaze_get_schedule', {
     });
 
     ctx.enrich({ applied_feeds: succeeded });
-    ctx.enrich.total(merged.length);
-    if (page.nextCursor) {
-      ctx.enrich.truncated({ shown: page.items.length, cap: input.limit });
-    }
 
     const fragments: string[] = [];
     if (merged.length === 0) {
@@ -256,7 +253,7 @@ export const getSchedule = tool('tvmaze_get_schedule', {
         `The ${failed.join(' and ')} feed did not respond, so these results cover ${succeeded.join(', ')} only. Call tvmaze_get_schedule again to retry it.`,
       );
     }
-    if (fragments.length > 0) ctx.enrich.notice(fragments.join(' '));
+    enrichPage(ctx, page, 'entries', fragments);
 
     return {
       entries: page.items,
@@ -283,7 +280,7 @@ export const getSchedule = tool('tvmaze_get_schedule', {
           `### ${inline(`${entry.show.name} — ${entry.name}`)}`,
           field('feed', entry.feed),
           ...episodeLines(entry),
-          ...showSummaryLines(entry.show),
+          ...scheduleShowLines(entry.show),
         );
       }
     }

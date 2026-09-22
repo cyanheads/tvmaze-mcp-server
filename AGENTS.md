@@ -143,7 +143,8 @@ export const searchShows = tool('tvmaze_search_shows', {
 
 Conventions this surface holds to, and that a new tool inherits:
 
-- **Output shapes are shared, error contracts are not.** `ShowSummary`, `Episode`, `Season`, and `CastCredit` — plus the `format()` renderers that keep them at parity — live in `shared-schemas.ts`. Each tool declares its own `errors[]` inline; per-tool repetition is the intended cost of locality.
+- **Output shapes are shared, error contracts are not.** `ShowSummary`, `ScheduleShow`, `Episode`, `Season`, and `CastCredit` — plus the `format()` renderers that keep them at parity — live in `shared-schemas.ts`. Each tool declares its own `errors[]` inline; per-tool repetition is the intended cost of locality.
+- **List tools page through `paging.ts`, not `paginateArray`.** `pageOf` takes the page size from the current `limit` and only the offset from the cursor; `enrichPage` writes `totalCount`, `truncated` / `shown` / `cap`, and one joined `notice` — pass a tool's own notice fragments to it rather than calling `ctx.enrich.notice`, which is last-wins.
 - **No tool declares `auth` scopes.** Every tool reads public data from a keyless API and the deployment posture is `MCP_AUTH_MODE=none`. A deployment that later enables JWT adds one `tool:<name>:read` scope per tool then.
 - **An absent optional value renders as `Not available`**, never `0`, `""`, or a dropped line — that is what keeps `format-parity` holding on TVmaze's sparse records.
 - **A hit-or-miss result is one flat `z.object` with optional fields**, never a `z.discriminatedUnion` (`tool()` rejects a union as an output root), and `format()` renders each arm from its own `if` block.
@@ -324,6 +325,7 @@ src/
   mcp-server/
     tools/definitions/
       [tool-name].tool.ts               # Tool definitions (one per tvmaze_* tool)
+      paging.ts                         # Local paging for the list tools — pageOf, enrichPage
       shared-schemas.ts                 # Output schemas + format() renderers shared across tools
 ```
 

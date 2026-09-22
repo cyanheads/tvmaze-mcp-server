@@ -1,13 +1,18 @@
 /**
- * @fileoverview Tests for tvmaze_get_show — full profile, seasons table,
- * next/previous episode blocks, the Running-with-no-next-episode notice, and
- * the show_not_found / invalid_timezone error contract.
+ * @fileoverview Tests for tvmaze_get_show — full profile, seasons table (and
+ * its cell escaping), next/previous episode blocks, the shared episode
+ * schema's local_date description, the Running-with-no-next-episode notice,
+ * and the show_not_found / invalid_timezone error contract.
  * @module tests/mcp-server/tools/definitions/get-show.tool.test
  */
 
+import { z } from '@cyanheads/mcp-ts-core';
 import { runToolContract } from '@cyanheads/mcp-ts-core/testing';
 import { describe, expect, it } from 'vitest';
 
+import { getEpisodes } from '@/mcp-server/tools/definitions/get-episodes.tool.js';
+import { getNextEpisode } from '@/mcp-server/tools/definitions/get-next-episode.tool.js';
+import { getSchedule } from '@/mcp-server/tools/definitions/get-schedule.tool.js';
 import { getShow } from '@/mcp-server/tools/definitions/get-show.tool.js';
 import {
   rawEpisode,
@@ -58,6 +63,101 @@ describe('tvmaze_get_show', () => {
     expect(text).toContain('Next Up');
     expect(text).toContain('## Previous episode');
     expect(text).toContain('Last One');
+  });
+
+  it('renders each season as one pinned seven-column table row', async () => {
+    getHttp().route({
+      match: `${TVMAZE_TEST_BASE_URL}/shows/169?${EMBED_QS}`,
+      respond: Response.json(
+        rawShow({
+          _embedded: {
+            seasons: [rawSeason(), rawSeason({ id: 2, number: 2, name: 'The Return' })],
+          },
+        }),
+      ),
+    });
+
+    const result = await runToolContract(getShow, { show_id: 169 });
+    const text = (result.content[0] as { text: string }).text;
+    expect(text).toContain(
+      [
+        '| number | name | episode_order | premiere_date | end_date | channel | id |',
+        '|---|---|---|---|---|---|---|',
+        '| 1 | Not available | 7 | 2008-01-20 | 2008-03-09 | AMC | 1 |',
+        '| 2 | The Return | 7 | 2008-01-20 | 2008-03-09 | AMC | 2 |',
+      ].join('\n'),
+    );
+  });
+
+  it('escapes a pipe in a season name or channel so the row keeps its seven columns', async () => {
+    getHttp().route({
+      match: `${TVMAZE_TEST_BASE_URL}/shows/169?${EMBED_QS}`,
+      respond: Response.json(
+        rawShow({
+          _embedded: {
+            seasons: [
+              rawSeason({
+                id: 1,
+                number: 2,
+                name: 'Part 1 | Part 2',
+                episodeOrder: 5,
+                premiereDate: '2020-01-01',
+                endDate: '2020-02-01',
+                network: { id: 8, name: 'HBO | Max' },
+              }),
+              // A backslash already in front of a pipe must not cancel the escape.
+              rawSeason({ id: 3, number: 3, name: 'A\\|B' }),
+            ],
+          },
+        }),
+      ),
+    });
+
+    const result = await runToolContract(getShow, { show_id: 169 });
+    expect(result.structuredContent).toMatchObject({
+      seasons: [{ name: 'Part 1 | Part 2', channel: 'HBO | Max' }, { name: 'A\\|B' }],
+    });
+    const text = (result.content[0] as { text: string }).text;
+    expect(text).toContain(
+      '| 2 | Part 1 \\| Part 2 | 5 | 2020-01-01 | 2020-02-01 | HBO \\| Max | 1 |',
+    );
+    expect(text).toContain('| 3 | A\\\\\\|B | 7 | 2008-01-20 | 2008-03-09 | AMC | 3 |');
+
+    /** Cells as a GFM table splits the row: on pipes not escaped by an odd run of backslashes. */
+    const cells = (row: string) => row.split(/(?<!\\)(?:\\\\)*\|/).slice(1, -1);
+    const rows = text.split('\n').filter((line) => /^\| [23] \|/.test(line));
+    expect(rows).toHaveLength(2);
+    for (const row of rows) expect(cells(row)).toHaveLength(7);
+  });
+
+  it('describes local_date on every tool that returns an episode for both time_known cases', () => {
+    const localDateDescription = (tool: { output: z.ZodType }) => {
+      const found: string[] = [];
+      const walk = (node: unknown): void => {
+        if (!node || typeof node !== 'object') return;
+        for (const [key, value] of Object.entries(node)) {
+          if (
+            key === 'local_date' &&
+            typeof value === 'object' &&
+            value &&
+            'description' in value
+          ) {
+            found.push(String((value as { description: unknown }).description));
+          } else walk(value);
+        }
+      };
+      walk(z.toJSONSchema(tool.output));
+      return found;
+    };
+    for (const tool of [getShow, getEpisodes, getNextEpisode, getSchedule]) {
+      const descriptions = localDateDescription(tool);
+      expect(descriptions.length).toBeGreaterThan(0);
+      for (const description of descriptions) {
+        expect(description).toContain('time_known is true');
+        expect(description).toContain('time_known is false');
+        expect(description).toContain('not timezone-converted');
+      }
+    }
   });
 
   it('renders an empty-row placeholder for a show with no seasons recorded', async () => {

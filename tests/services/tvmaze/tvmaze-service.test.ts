@@ -16,6 +16,8 @@ import {
   normalizeCountry,
   normalizeCrewCredit,
   normalizeEpisode,
+  normalizeGuestCrewCredit,
+  normalizeScheduleShow,
   normalizeSeason,
   normalizeShow,
   stripHtml,
@@ -28,6 +30,7 @@ import {
   rawEpisode,
   rawEpisodeNoTime,
   rawEpisodeSpecial,
+  rawGuestCrewCredit,
   rawSearchHit,
   rawSeason,
   rawShow,
@@ -363,6 +366,55 @@ describe('normalizeCastCredit / normalizeCrewCredit', () => {
     expect(credit).not.toHaveProperty('as_self');
     expect(credit).not.toHaveProperty('voice_only');
   });
+
+  it('normalizes a guest-crew row, reading its role from guestCrewType rather than type', () => {
+    const credit = normalizeGuestCrewCredit(rawGuestCrewCredit({ guestCrewType: 'Writer' }));
+    expect(credit).toEqual({
+      person_name: 'Ben Stiller',
+      person_url: 'https://www.tvmaze.com/people/39582/ben-stiller',
+      person_id: 39_582,
+      credit_type: 'Writer',
+      person_image_url: 'https://static.tvmaze.com/uploads/images/original_untouched/10/25671.jpg',
+    });
+  });
+
+  it('omits credit_type on a guest-crew row whose role is missing', () => {
+    const credit = normalizeGuestCrewCredit(rawGuestCrewCredit({ guestCrewType: null }));
+    expect(credit).not.toHaveProperty('credit_type');
+  });
+});
+
+describe('normalizeScheduleShow', () => {
+  it('keeps only the compact reference fields, dropping the profile', () => {
+    expect(normalizeScheduleShow(rawShow())).toEqual({
+      id: 169,
+      name: 'Breaking Bad',
+      url: 'https://www.tvmaze.com/shows/169/breaking-bad',
+      type: 'Scripted',
+      genres: ['Drama', 'Crime', 'Thriller'],
+      channel: 'AMC',
+      channel_type: 'network',
+      channel_country: 'US',
+    });
+  });
+
+  it('picks the streaming service as the channel and leaves absent fields absent', () => {
+    expect(normalizeScheduleShow(rawShowStreaming())).toEqual({
+      id: 500,
+      name: 'Streaming Show',
+      url: 'https://www.tvmaze.com/shows/500/streaming-show',
+      type: 'Scripted',
+      genres: ['Drama'],
+      channel: 'Netflix',
+      channel_type: 'web_channel',
+    });
+    expect(normalizeScheduleShow(rawShowSparse())).toEqual({
+      id: 999,
+      name: 'A Small Title',
+      url: 'https://www.tvmaze.com/shows/999/small-title',
+      genres: [],
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -492,20 +544,71 @@ describe('TvmazeService HTTP boundary', () => {
     expect(episodes?.map((e) => e.type)).toEqual(['regular', 'significant_special']);
   });
 
-  it('getShowEpisodes requests ?specials=1 only when includeSpecials is true', async () => {
-    http.route({
-      match: `${BASE_URL}/shows/169/episodes`,
-      respond: Response.json([rawEpisode()]),
-    });
+  it('getShowEpisodes always requests ?specials=1 and returns the specials with the run, from one cached URL', async () => {
     http.route({
       match: `${BASE_URL}/shows/169/episodes?specials=1`,
-      respond: Response.json([rawEpisode(), rawEpisodeSpecial()]),
+      respond: () => Response.json([rawEpisode(), rawEpisodeSpecial()]),
     });
-    const svc = service();
-    const withoutSpecials = await svc.getShowEpisodes(169, 'UTC', createMockContext(), false);
-    const withSpecials = await svc.getShowEpisodes(169, 'UTC', createMockContext(), true);
-    expect(withoutSpecials).toHaveLength(1);
-    expect(withSpecials).toHaveLength(2);
+    const svc = service({ cacheTtlS: 300 });
+    const first = await svc.getShowEpisodes(169, 'UTC', createMockContext());
+    const second = await svc.getShowEpisodes(169, 'UTC', createMockContext());
+    expect(first?.map((e) => e.type)).toEqual(['regular', 'significant_special']);
+    expect(second).toEqual(first);
+    expect(http.calls.map((call) => call.request.url)).toEqual([
+      `${BASE_URL}/shows/169/episodes?specials=1`,
+    ]);
+  });
+
+  it('getShowEpisodes returns null on a 404', async () => {
+    http.route({
+      match: `${BASE_URL}/shows/99999999/episodes?specials=1`,
+      respond: new Response(tvmazeErrorBody('Not Found', '', 404), { status: 404 }),
+    });
+    await expect(
+      service().getShowEpisodes(99_999_999, 'UTC', createMockContext()),
+    ).resolves.toBeNull();
+  });
+
+  it('getEpisodesByDate reads /episodesbydate, keeping specials and resolving air times', async () => {
+    http.route({
+      match: `${BASE_URL}/shows/2756/episodesbydate?date=2025-03-12`,
+      respond: Response.json([
+        rawEpisode({ id: 3_166_429, airdate: '2025-03-12', airstamp: '2025-03-13T03:35:00+00:00' }),
+        rawEpisodeSpecial({ id: 7 }),
+      ]),
+    });
+    const episodes = await service().getEpisodesByDate(
+      2756,
+      '2025-03-12',
+      'America/New_York',
+      createMockContext(),
+    );
+    expect(episodes?.map((e) => [e.id, e.type, e.local_date])).toEqual([
+      [3_166_429, 'regular', '2025-03-12'],
+      [7, 'significant_special', '2015-12-25'],
+    ]);
+  });
+
+  it('getEpisodesByDate returns null on the 404 the route gives for an empty date or a bad show', async () => {
+    http.route({
+      match: `${BASE_URL}/shows/2756/episodesbydate?date=2025-03-15`,
+      respond: new Response(tvmazeErrorBody('Not Found', '', 404), { status: 404 }),
+    });
+    await expect(
+      service().getEpisodesByDate(2756, '2025-03-15', 'UTC', createMockContext()),
+    ).resolves.toBeNull();
+  });
+
+  it('getEpisodesByDate reclassifies a 422 on a non-calendar date as invalid_date', async () => {
+    http.route({
+      match: `${BASE_URL}/shows/2756/episodesbydate?date=2025-02-30`,
+      respond: new Response(tvmazeErrorBody('Unprocessable entity', 'Not a valid ISO date', 422), {
+        status: 422,
+      }),
+    });
+    await expect(
+      service().getEpisodesByDate(2756, '2025-02-30', 'UTC', createMockContext()),
+    ).rejects.toMatchObject({ data: { reason: 'invalid_date' } });
   });
 
   it('getScheduleFeed normalizes a linear row nested at entry.show', async () => {
@@ -521,6 +624,9 @@ describe('TvmazeService HTTP boundary', () => {
     );
     expect(entries).toHaveLength(1);
     expect(entries[0]).toMatchObject({ feed: 'linear', show: { id: 169 } });
+    // Schedule rows carry the compact reference, not the profile.
+    expect(entries[0]?.show).not.toHaveProperty('summary');
+    expect(entries[0]?.show).not.toHaveProperty('externals');
   });
 
   it('getScheduleFeed normalizes a streaming row nested at entry._embedded.show', async () => {
@@ -567,6 +673,41 @@ describe('TvmazeService HTTP boundary', () => {
       credit_type: 'Executive Producer',
     });
     expect(crew?.[0]).not.toHaveProperty('character_name');
+  });
+
+  it('getEpisodeCredits reads guest cast and guest crew from one embed request', async () => {
+    http.route({
+      match: `${BASE_URL}/episodes/2939679?embed[]=guestcast&embed[]=guestcrew`,
+      respond: Response.json({
+        ...rawEpisode({ id: 2_939_679 }),
+        _embedded: { guestcast: [rawCastCredit()], guestcrew: [rawGuestCrewCredit()] },
+      }),
+    });
+    const credits = await service().getEpisodeCredits(2_939_679, createMockContext());
+    expect(credits?.cast).toEqual([expect.objectContaining({ character_name: 'Walter White' })]);
+    expect(credits?.crew).toEqual([
+      expect.objectContaining({ person_name: 'Ben Stiller', credit_type: 'Director' }),
+    ]);
+    expect(http.calls).toHaveLength(1);
+  });
+
+  it('getEpisodeCredits reads a missing embed key as an empty list', async () => {
+    http.route({
+      match: `${BASE_URL}/episodes/11?embed[]=guestcast&embed[]=guestcrew`,
+      respond: Response.json({ ...rawEpisode(), _embedded: { guestcast: [] } }),
+    });
+    await expect(service().getEpisodeCredits(11, createMockContext())).resolves.toEqual({
+      cast: [],
+      crew: [],
+    });
+  });
+
+  it('getEpisodeCredits returns null on a 404', async () => {
+    http.route({
+      match: `${BASE_URL}/episodes/99999999?embed[]=guestcast&embed[]=guestcrew`,
+      respond: new Response(tvmazeErrorBody('Not Found', '', 404), { status: 404 }),
+    });
+    await expect(service().getEpisodeCredits(99_999_999, createMockContext())).resolves.toBeNull();
   });
 
   it('getEpisodeGuestCast returns null on a 404', async () => {

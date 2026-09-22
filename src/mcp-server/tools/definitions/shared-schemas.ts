@@ -12,7 +12,11 @@ import { z } from '@cyanheads/mcp-ts-core';
 // Schemas
 // ---------------------------------------------------------------------------
 
-/** Compact show identity — used in search results, schedule rows, and episode references. */
+/**
+ * Show identity plus profile summary — used in search results, lookups, show
+ * profiles, and episode references. Schedule rows carry {@link ScheduleShow}
+ * instead.
+ */
 export const ShowSummary = z.object({
   id: z
     .number()
@@ -85,6 +89,22 @@ export const ShowSummary = z.object({
     ),
 });
 
+/**
+ * The compact show reference on a schedule row: identity and channel only. A
+ * day's schedule repeats a show on every episode it airs, so the profile fields
+ * stay behind a tvmaze_get_show call.
+ */
+export const ScheduleShow = ShowSummary.pick({
+  id: true,
+  name: true,
+  url: true,
+  type: true,
+  channel: true,
+  channel_type: true,
+  channel_country: true,
+  genres: true,
+});
+
 /** An episode, with air time resolved into the requested timezone. */
 export const Episode = z.object({
   id: z
@@ -110,7 +130,7 @@ export const Episode = z.object({
   type: z
     .string()
     .describe(
-      'Episode classification: "regular", "significant_special", or "insignificant_special". Anything other than "regular" is a special, and specials are excluded from a whole-run listing unless include_specials is set.',
+      'Episode classification: "regular", "significant_special", or "insignificant_special". Anything other than "regular" is a special; tvmaze_get_episodes leaves specials out unless include_specials is set.',
     ),
   airstamp: z
     .string()
@@ -119,7 +139,9 @@ export const Episode = z.object({
     ),
   local_date: z
     .string()
-    .describe('Calendar date the episode airs, in the requested timezone, ISO 8601 (YYYY-MM-DD).'),
+    .describe(
+      'Calendar date the episode airs, ISO 8601 (YYYY-MM-DD). When time_known is true, the date in the requested timezone. When time_known is false, the source’s own announced air date, not timezone-converted — the same in every timezone.',
+    ),
   local_time: z
     .string()
     .optional()
@@ -276,6 +298,18 @@ export function showSummaryLines(show: z.infer<typeof ShowSummary>): string[] {
   ];
 }
 
+/**
+ * Every {@link ScheduleShow} field except `name`, which callers render in the
+ * heading of the row these lines go under.
+ */
+export function scheduleShowLines(show: z.infer<typeof ScheduleShow>): string[] {
+  return [
+    `${field('id', show.id)} | ${field('url', show.url)}`,
+    `${field('type', show.type)} | ${field('genres', show.genres)}`,
+    `${field('channel', show.channel)} | ${field('channel_type', show.channel_type)} | ${field('channel_country', show.channel_country)}`,
+  ];
+}
+
 /** Every {@link Episode} field, including the name. */
 export function episodeLines(episode: z.infer<typeof Episode>): string[] {
   return [
@@ -293,9 +327,19 @@ export const SEASON_TABLE_HEADER = [
   '|---|---|---|---|---|---|---|',
 ];
 
+/**
+ * {@link present}, escaped for a Markdown table cell. A literal `|` in a
+ * contributor-authored value would open a column of its own and shift every
+ * later field under the wrong header, so it becomes `\|` — and any backslashes
+ * already in front of it are doubled, so they cannot cancel that escape.
+ */
+function tableCell(value: unknown): string {
+  return present(value).replace(/(\\*)\|/g, (_match, slashes: string) => `${slashes}${slashes}\\|`);
+}
+
 /** Every {@link Season} field, as one row of the season table. */
 export function seasonRow(season: z.infer<typeof Season>): string {
-  return `| ${present(season.number)} | ${present(season.name)} | ${present(season.episode_order)} | ${present(season.premiere_date)} | ${present(season.end_date)} | ${present(season.channel)} | ${present(season.id)} |`;
+  return `| ${tableCell(season.number)} | ${tableCell(season.name)} | ${tableCell(season.episode_order)} | ${tableCell(season.premiere_date)} | ${tableCell(season.end_date)} | ${tableCell(season.channel)} | ${tableCell(season.id)} |`;
 }
 
 /** Every {@link CastCredit} field. */

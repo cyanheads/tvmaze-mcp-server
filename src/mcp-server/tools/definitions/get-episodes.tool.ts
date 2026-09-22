@@ -1,15 +1,16 @@
 /**
- * @fileoverview tvmaze_get_episodes — a show's episode guide, scoped to one
- * season by default and paged across the whole run when no season is given.
+ * @fileoverview tvmaze_get_episodes — a show's episode guide: one season, one
+ * air date, or the whole run paged, with specials filtered locally and counted
+ * on every arm.
  * @module mcp-server/tools/definitions/get-episodes.tool
  */
 
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
-import { paginateArray } from '@cyanheads/mcp-ts-core/utils';
 
 import { getTvmazeService } from '@/services/tvmaze/tvmaze-service.js';
 import type { Episode as EpisodeShape, Season as SeasonShape } from '@/services/tvmaze/types.js';
+import { DEFAULT_PAGE_SIZE, enrichPage, MAX_PAGE_SIZE, pageOf } from './paging.js';
 import {
   Episode,
   episodeLines,
@@ -18,9 +19,6 @@ import {
   ShowSummary,
   showSummaryLines,
 } from './shared-schemas.js';
-
-/** The highest page size the `limit` input allows, and the ceiling a cursor is clamped to. */
-const MAX_PAGE_SIZE = 250;
 
 /** `1-8` for a contiguous run, `1, 3, 7` otherwise, `none` for a show with no seasons. */
 function describeSeasons(seasons: SeasonShape[]): string {
@@ -34,7 +32,7 @@ function describeSeasons(seasons: SeasonShape[]): string {
 
 export const getEpisodes = tool('tvmaze_get_episodes', {
   description:
-    'List a show’s episodes with air times, runtimes, and synopses. Pass a season number to list one season, which is the cheaper path and the usual one; omit it to walk the whole run, which is paged because a long-running series returns hundreds of episodes. Specials are excluded unless include_specials is set.',
+    'List a show’s episodes with air times, runtimes, and synopses. Pass a season number to list one season, which is the cheaper path and the usual one; pass air_date to list the episodes dated to one day, the direct path to a single night of a daily show; omit both to walk the whole run, which is paged because a long-running series returns hundreds of episodes. Specials are excluded unless include_specials is set, and the number left out is reported.',
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
 
   errors: [
@@ -53,6 +51,14 @@ export const getEpisodes = tool('tvmaze_get_episodes', {
         'Call tvmaze_get_show for this id to see the seasons it has, then call tvmaze_get_episodes with one of those numbers.',
     },
     {
+      reason: 'invalid_date',
+      code: JsonRpcErrorCode.ValidationError,
+      when: 'The air_date is well-formed but not a real calendar date.',
+      recovery:
+        'Pass a real calendar date as YYYY-MM-DD in air_date, or pass season instead to list the whole season.',
+      thrownBy: 'service',
+    },
+    {
       reason: 'invalid_timezone',
       code: JsonRpcErrorCode.ValidationError,
       when: 'The timezone is not an IANA zone name the runtime recognizes.',
@@ -62,49 +68,64 @@ export const getEpisodes = tool('tvmaze_get_episodes', {
     },
   ],
 
-  input: z.object({
-    show_id: z
-      .number()
-      .int()
-      .positive()
-      .describe(
-        'TVmaze show id, from tvmaze_search_shows, tvmaze_lookup_show, or tvmaze_get_schedule.',
-      ),
-    season: z
-      .number()
-      .int()
-      .positive()
-      .optional()
-      .describe(
-        'Season number to list, as numbered in the season list from tvmaze_get_show. Omit to list every episode of the series. Daily shows number seasons by calendar year.',
-      ),
-    include_specials: z
-      .boolean()
-      .default(false)
-      .describe(
-        'Include specials alongside regular episodes. Off by default because specials roughly double the result count on a series that has many.',
-      ),
-    limit: z
-      .number()
-      .int()
-      .min(1)
-      .max(MAX_PAGE_SIZE)
-      .default(50)
-      .describe(
-        'Maximum episodes to return in one call. Raise it for a short series; the default keeps a long run inside a reasonable response size.',
-      ),
-    cursor: z
-      .string()
-      .optional()
-      .describe('Continuation token from a previous call’s next_cursor. Omit for the first page.'),
-    timezone: z
-      .string()
-      .regex(/^[A-Za-z0-9_+-]+(\/[A-Za-z0-9_+-]+){0,2}$/)
-      .optional()
-      .describe(
-        'IANA timezone name for the air times, e.g. "America/Los_Angeles". Defaults to the server-configured timezone.',
-      ),
-  }),
+  input: z
+    .object({
+      show_id: z
+        .number()
+        .int()
+        .positive()
+        .describe(
+          'TVmaze show id, from tvmaze_search_shows, tvmaze_lookup_show, or tvmaze_get_schedule.',
+        ),
+      season: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe(
+          'Season number to list, as numbered in the season list from tvmaze_get_show. Omit, together with air_date, to list every episode of the series. Daily shows number seasons by calendar year.',
+        ),
+      air_date: z
+        .string()
+        .regex(/^\d{4}-\d{2}-\d{2}$/)
+        .optional()
+        .describe(
+          'Date to list, ISO 8601 (YYYY-MM-DD): the episodes the source dates to that day. It matches the source’s airdate, the broadcaster’s own programming day, so on a late-night slot it can differ by a day from the local_date an episode reports. Cannot be combined with season.',
+        ),
+      include_specials: z
+        .boolean()
+        .default(false)
+        .describe(
+          'Include specials alongside regular episodes. Off by default because specials roughly double the result count on a series that has many; when off, notice reports how many were left out.',
+        ),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(MAX_PAGE_SIZE)
+        .default(DEFAULT_PAGE_SIZE)
+        .describe(
+          'Maximum episodes to return in this call. Applies to every page, including a call that passes cursor. Raise it for a short series; the default keeps a long run inside a reasonable response size.',
+        ),
+      cursor: z
+        .string()
+        .optional()
+        .describe(
+          'Continuation token from a previous call’s next_cursor. It carries only the position to resume from; the page size comes from limit. Omit for the first page.',
+        ),
+      timezone: z
+        .string()
+        .regex(/^[A-Za-z0-9_+-]+(\/[A-Za-z0-9_+-]+){0,2}$/)
+        .optional()
+        .describe(
+          'IANA timezone name for the air times, e.g. "America/Los_Angeles". Defaults to the server-configured timezone.',
+        ),
+    })
+    .refine((input) => input.season === undefined || input.air_date === undefined, {
+      message:
+        'season and air_date cannot be combined — pass season to list a season, or air_date to list one day.',
+      path: ['air_date'],
+    }),
 
   output: z.object({
     episodes: z
@@ -114,7 +135,11 @@ export const getEpisodes = tool('tvmaze_get_episodes', {
     season: z
       .number()
       .optional()
-      .describe('Season number listed. Absent when the whole run was listed.'),
+      .describe('Season number listed. Absent when the whole run or one air date was listed.'),
+    air_date: z
+      .string()
+      .optional()
+      .describe('Air date listed, YYYY-MM-DD. Absent unless air_date was given.'),
     timezone: z.string().describe('IANA timezone the air times were rendered in.'),
     next_cursor: z
       .string()
@@ -127,51 +152,43 @@ export const getEpisodes = tool('tvmaze_get_episodes', {
     totalCount: z.number().describe('Episodes matching before the page limit was applied.'),
     truncated: z.boolean().optional().describe('True when the page limit was reached.'),
     shown: z.number().optional().describe('Number of episodes returned on this page.'),
-    cap: z.number().optional().describe('The page limit that was applied.'),
+    cap: z.number().optional().describe('The page size applied to this call — its limit.'),
     notice: z
       .string()
       .optional()
       .describe(
-        'Guidance when nothing was recorded, or when specials were filtered out of a season listing. Absent otherwise.',
+        'Guidance when the page was truncated, when nothing was recorded, or when specials were filtered out — every one that applies, joined. Absent otherwise.',
       ),
   },
 
   async handler(input, ctx) {
     const service = getTvmazeService();
     const timezone = service.resolveTimezone(input.timezone, ctx);
-    const fragments: string[] = [];
 
-    let show: z.infer<typeof ShowSummary>;
-    let matching: EpisodeShape[];
+    // The season arm needs the profile first, to map the season number onto
+    // the season id its route takes; the other two arms fetch alongside it.
+    const [profile, listed] = await Promise.all([
+      service.getShowWithSeasons(input.show_id, ctx),
+      input.air_date !== undefined
+        ? service.getEpisodesByDate(input.show_id, input.air_date, timezone, ctx)
+        : input.season === undefined
+          ? service.getShowEpisodes(input.show_id, timezone, ctx)
+          : null,
+    ]);
+    // The date route answers the same 404 for a missing show as for an empty
+    // date, so the profile is what decides whether the show exists.
+    if (!profile) {
+      throw ctx.fail('show_not_found', `No TVmaze show has id ${input.show_id}.`, {
+        show_id: input.show_id,
+        ...ctx.recoveryFor('show_not_found'),
+      });
+    }
+    const show = profile.show;
 
+    let all: EpisodeShape[];
     if (input.season === undefined) {
-      const [profile, episodes] = await Promise.all([
-        service.getShowWithSeasons(input.show_id, ctx),
-        service.getShowEpisodes(input.show_id, timezone, ctx, input.include_specials),
-      ]);
-      if (!profile) {
-        throw ctx.fail('show_not_found', `No TVmaze show has id ${input.show_id}.`, {
-          show_id: input.show_id,
-          ...ctx.recoveryFor('show_not_found'),
-        });
-      }
-      show = profile.show;
-      matching = episodes ?? [];
-      if (matching.length === 0) {
-        fragments.push(
-          `${show.name} has no episodes recorded yet. Call tvmaze_get_show to check its status and announced seasons.`,
-        );
-      }
+      all = listed ?? [];
     } else {
-      const profile = await service.getShowWithSeasons(input.show_id, ctx);
-      if (!profile) {
-        throw ctx.fail('show_not_found', `No TVmaze show has id ${input.show_id}.`, {
-          show_id: input.show_id,
-          ...ctx.recoveryFor('show_not_found'),
-        });
-      }
-      show = profile.show;
-
       const season = profile.seasons.find((candidate) => candidate.number === input.season);
       if (!season) {
         throw ctx.fail(
@@ -180,43 +197,63 @@ export const getEpisodes = tool('tvmaze_get_episodes', {
           { show_id: input.show_id, season: input.season, ...ctx.recoveryFor('season_not_found') },
         );
       }
-
-      // The season route always includes specials and ignores ?specials=1, so
-      // the filter runs locally to keep one contract with the whole-run arm.
-      const all = (await service.getSeasonEpisodes(season.id, timezone, ctx)) ?? [];
-      matching = input.include_specials ? all : all.filter((episode) => episode.type === 'regular');
-      const omitted = all.length - matching.length;
-
-      if (matching.length === 0) {
-        fragments.push(
-          `Season ${input.season} of ${show.name} has no episodes recorded. Call tvmaze_get_show to see which seasons exist.`,
-        );
-      }
-      if (omitted > 0) {
-        fragments.push(
-          `${omitted} special(s) in this season were omitted. Call again with include_specials true to include them.`,
-        );
-      }
+      all = (await service.getSeasonEpisodes(season.id, timezone, ctx)) ?? [];
     }
 
-    const page = paginateArray(matching, input.cursor, input.limit, MAX_PAGE_SIZE, ctx);
+    // Every route this tool reads returns specials, so one local filter keeps
+    // one contract across the arms and always knows how many it dropped.
+    const matching = input.include_specials
+      ? all
+      : all.filter((episode) => episode.type === 'regular');
+    const omitted = all.length - matching.length;
+
+    const fragments: string[] = [];
+    if (input.air_date !== undefined) {
+      if (all.length === 0) {
+        fragments.push(
+          `No episode of ${show.name} is dated ${input.air_date}. air_date matches the source’s airdate, the broadcaster’s programming day, which can differ by a day from local_date on a late-night slot. Call again with season in place of air_date to see that season’s dates.`,
+        );
+      }
+    } else if (input.season === undefined) {
+      if (all.length === 0) {
+        fragments.push(
+          `${show.name} has no episodes recorded yet. Call tvmaze_get_show to check its status and announced seasons.`,
+        );
+      }
+    } else if (matching.length === 0) {
+      fragments.push(
+        `Season ${input.season} of ${show.name} has no episodes recorded. Call tvmaze_get_show to see which seasons exist.`,
+      );
+    }
+    if (omitted > 0) {
+      const scope =
+        input.air_date !== undefined
+          ? `dated ${input.air_date}`
+          : input.season === undefined
+            ? 'across the whole run'
+            : 'in this season';
+      fragments.push(
+        `${omitted} special(s) ${scope} were omitted. Call again with include_specials true to include them.`,
+      );
+    }
+
+    const page = pageOf(matching, input.cursor, input.limit, ctx);
     ctx.log.info('Episode guide fetched', {
       showId: input.show_id,
       season: input.season,
+      airDate: input.air_date,
       matching: matching.length,
+      omittedSpecials: omitted,
       returned: page.items.length,
     });
 
-    ctx.enrich.total(matching.length);
-    if (page.nextCursor) {
-      ctx.enrich.truncated({ shown: page.items.length, cap: input.limit });
-    }
-    if (fragments.length > 0) ctx.enrich.notice(fragments.join(' '));
+    enrichPage(ctx, page, 'episodes', fragments);
 
     return {
       episodes: page.items,
       show,
       ...(input.season === undefined ? {} : { season: input.season }),
+      ...(input.air_date === undefined ? {} : { air_date: input.air_date }),
       timezone,
       ...(page.nextCursor ? { next_cursor: page.nextCursor } : {}),
       has_more: page.nextCursor !== undefined,
@@ -224,10 +261,20 @@ export const getEpisodes = tool('tvmaze_get_episodes', {
   },
 
   format: (result) => {
-    const scope = result.season === undefined ? 'all episodes' : `Season ${result.season}`;
+    const scope =
+      result.air_date !== undefined
+        ? `air date ${result.air_date}`
+        : result.season === undefined
+          ? 'all episodes'
+          : `Season ${result.season}`;
+    const echo = [
+      field('season', result.season),
+      ...(result.air_date === undefined ? [] : [field('air_date', result.air_date)]),
+      field('timezone', result.timezone),
+    ];
     const lines: string[] = [
       `# ${inline(result.show.name)} — ${scope}`,
-      `${field('season', result.season)} | ${field('timezone', result.timezone)}`,
+      echo.join(' | '),
       ...showSummaryLines(result.show),
     ];
     for (const episode of result.episodes) {

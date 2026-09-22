@@ -39,9 +39,9 @@ Television data from TVmaze — a community-maintained database of series, episo
 | `tvmaze_get_show` | Full profile for one TVmaze id — weekly slot, season list, and the previous and next episode |
 | `tvmaze_lookup_show` | Resolve a show from its IMDb, TheTVDB, or TVRage id into the matching TVmaze profile |
 | `tvmaze_get_next_episode` | When a show's next episode airs, by TVmaze id or title, converted to a viewer timezone |
-| `tvmaze_get_episodes` | Episode guide for one season or the whole run, with air times, runtimes, and synopses |
+| `tvmaze_get_episodes` | Episode guide for one season, one air date, or the whole run, with air times, runtimes, and synopses |
 | `tvmaze_get_schedule` | Episodes airing on a date — broadcast and cable networks in one country, streaming services, or both |
-| `tvmaze_get_cast` | A show's credited cast and the characters they play, optionally crew; or one episode's guest cast |
+| `tvmaze_get_cast` | A show's credited cast and the characters they play, optionally crew; or one episode's guest cast, optionally with its director and writers |
 
 ## Capability reference
 
@@ -74,16 +74,17 @@ Television data from TVmaze — a community-maintained database of series, episo
 
 - `by: "id"` takes a TVmaze id; `by: "title"` resolves a title through a stricter single-match search than `tvmaze_search_shows` uses
 - Air times render in the requested IANA `timezone`; `time_known: false` means the source announced no clock time, so only the date is reliable
-- Typed `miss_reason` — `show_not_found` on the title arm, `no_scheduled_episode` for a series between seasons, the latter still carrying `previous_episode`
+- Typed `miss_reason` — `show_not_found` on the title arm, `no_scheduled_episode` for a series between seasons, the latter still carrying `previous_episode`; the text output's headline names the same miss
 - A `show_id` that resolves to nothing throws `show_not_found_by_id`; an unresolvable title is a miss
 
 ---
 
 ### `tvmaze_get_episodes` <sub>tool</sub>
 
-- `season` lists one season (the cheaper path); omit it to walk the whole run
-- `include_specials` defaults to false; a season listing reports how many specials it filtered out
-- `limit` 1–250 (default 50) with `cursor` / `next_cursor` pagination and `has_more`; enrichment carries the pre-page `totalCount`
+- `season` lists one season (the cheaper path); `air_date` (`YYYY-MM-DD`) lists the episodes dated to one day, the direct way to find one night of a daily show; omit both to walk the whole run. `season` and `air_date` cannot be combined
+- `air_date` matches the source's `airdate`, the broadcaster's programming day, which can differ by a day from an episode's `local_date` on a late-night slot. A day with nothing on it returns an empty list with a notice; a date that is not on the calendar fails as `invalid_date`
+- `include_specials` defaults to false; every listing, whether season, air date, or whole run, reports how many specials it filtered out
+- `limit` 1–250 (default 50) sets the page size on every call, including one that passes `cursor`; `next_cursor` / `has_more` continue the listing, and enrichment carries the pre-page `totalCount` plus `truncated` / `shown` / `cap` on a partial page
 - A `season_not_found` failure names the seasons that do exist
 
 ---
@@ -92,15 +93,17 @@ Television data from TVmaze — a community-maintained database of series, episo
 
 - `scope` picks the feed: `linear` is one country's broadcast and cable networks plus its own streaming services, `streaming` is global services when `country` is omitted and that country's local ones when it is given, `all` merges both across three upstream requests
 - `date` defaults to today in the requested `timezone`; `country` is ISO 3166-1 alpha-2 (the United Kingdom is `GB`) and falls back to the configured default for `linear` and `all`
-- Entries carry `feed` (`linear` / `streaming`) alongside the episode and its show; a merged query dedupes and sorts by `airstamp`
+- Entries carry `feed` (`linear` / `streaming`) alongside the episode; a merged query dedupes and sorts by `airstamp`
+- Each entry's `show` is a compact reference — `id`, `name`, `url`, `type`, `genres`, and the channel — since a day's listing repeats a show on every episode; `tvmaze_get_show` returns the full profile
 - `applied_feeds` names exactly which upstream feeds answered, e.g. `["linear:GB","web:GB","web:global"]`; one feed failing degrades to a notice instead of failing the call
-- `limit` 1–250 (default 50) with cursor pagination — a country day runs to roughly 50 broadcast entries, the global streaming feed to over 120
+- `limit` 1–250 (default 50) sets the page size on every call, including one that passes `cursor` — a country day runs to roughly 50 broadcast entries, the global streaming feed to over 120
 
 ---
 
 ### `tvmaze_get_cast` <sub>tool</sub>
 
-- `scope: "show"` returns the main cast with character names, plus crew when `include_crew` is set; `scope: "episode"` returns that episode's guest cast
+- `scope: "show"` returns the main cast with character names, plus the show's crew when `include_crew` is set; `scope: "episode"` returns that episode's guest cast, plus its guest crew (director, writers) when `include_crew` is set, still in a single upstream request
+- Paged on both scopes: `limit` 1–250 (default 50) and `cursor`, with cast rows first and crew rows after them in one sequence, split back into `cast` and `crew` on each page; `cast_total` / `crew_total` and the enrichment `totalCount` count every page
 - Cast credits carry `as_self` and `voice_only`; crew credits carry `credit_type` and no character
 - TVmaze records no recurring-versus-guest distinction on a show's cast list, so absence from it is not evidence a performer never appeared — check an episode's guest cast
 - Missing credits arrive as a notice, not an error; community coverage thins on smaller titles

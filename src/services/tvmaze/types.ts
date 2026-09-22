@@ -73,6 +73,15 @@ export interface RawCrewCredit {
   type?: string | null;
 }
 
+/**
+ * An episode guest-crew row from the `guestcrew` embed — `{ person, guestCrewType }`,
+ * a different key from the show-crew row's `type`.
+ */
+export interface RawGuestCrewCredit {
+  guestCrewType?: string | null;
+  person: RawPerson;
+}
+
 /** A season header from `/shows/{id}/seasons` or the `seasons` embed. */
 export interface RawSeason {
   endDate?: string | null;
@@ -116,10 +125,15 @@ export interface RawShow {
 
 /**
  * An episode record. Schedule rows carry the show at `show` (linear feed) or at
- * `_embedded.show` (streaming feed) — never both.
+ * `_embedded.show` (streaming feed) — never both. `/episodes/{id}` carries the
+ * credits embeds it was asked for.
  */
 export interface RawEpisode {
-  _embedded?: { show?: RawShow } | null;
+  _embedded?: {
+    guestcast?: RawCastCredit[];
+    guestcrew?: RawGuestCrewCredit[];
+    show?: RawShow;
+  } | null;
   airdate?: string | null;
   airstamp: string;
   airtime?: string | null;
@@ -146,7 +160,7 @@ export interface RawSearchHit {
 // Normalized domain shapes
 // ---------------------------------------------------------------------------
 
-/** Compact show identity, shared by search results, schedule rows, and lookups. */
+/** Show identity and profile summary, shared by search results, lookups, and episode listings. */
 export interface ShowSummary {
   average_runtime_minutes?: number;
   channel?: string;
@@ -230,10 +244,20 @@ export interface ShowDetail {
   show: ShowProfile;
 }
 
+/**
+ * The compact show reference a schedule row carries. A day's schedule repeats a
+ * show on every episode it airs, so the row holds identity and channel only;
+ * the full profile is one `/shows/{id}` call away.
+ */
+export type ScheduleShow = Pick<
+  ShowSummary,
+  'id' | 'name' | 'url' | 'type' | 'channel' | 'channel_type' | 'channel_country' | 'genres'
+>;
+
 /** A schedule row — an episode plus the show it belongs to and the feed it came from. */
 export interface ScheduleEntry extends Episode {
   feed: 'linear' | 'streaming';
-  show: ShowSummary;
+  show: ScheduleShow;
 }
 
 /** Which upstream schedule feed a single request reads. */

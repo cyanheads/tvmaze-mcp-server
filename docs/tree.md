@@ -1,6 +1,6 @@
 # tvmaze-mcp-server - Directory Structure
 
-Generated on: 2026-09-20 03:08:29
+Generated on: 2026-09-22 18:46:31
 
 ```text
 tvmaze-mcp-server/
@@ -143,6 +143,7 @@ tvmaze-mcp-server/
 │   │           ├── get-schedule.tool.ts
 │   │           ├── get-show.tool.ts
 │   │           ├── lookup-show.tool.ts
+│   │           ├── paging.ts
 │   │           ├── search-shows.tool.ts
 │   │           └── shared-schemas.ts
 │   ├── services/

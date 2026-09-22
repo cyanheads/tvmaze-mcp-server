@@ -26,11 +26,13 @@ import type {
   RawCastCredit,
   RawCrewCredit,
   RawEpisode,
+  RawGuestCrewCredit,
   RawSearchHit,
   RawSeason,
   RawShow,
   ScheduleEntry,
   ScheduleFeed,
+  ScheduleShow,
   Season,
   ShowDetail,
   ShowProfile,
@@ -252,7 +254,7 @@ function channelOf(
   };
 }
 
-/** Normalize a show record into the compact identity every tool shares. */
+/** Normalize a show record into the show summary search, lookup, and episode tools share. */
 export function normalizeShow(raw: RawShow): ShowSummary {
   const externals = raw.externals ?? {};
   const summary = raw.summary ? stripHtml(raw.summary) : '';
@@ -279,6 +281,18 @@ export function normalizeShow(raw: RawShow): ShowSummary {
     },
     ...(raw.image?.original ? { image_url: raw.image.original } : {}),
     ...(summary ? { summary } : {}),
+  };
+}
+
+/** Normalize a show record into the compact reference a schedule row carries. */
+export function normalizeScheduleShow(raw: RawShow): ScheduleShow {
+  return {
+    id: raw.id,
+    name: raw.name,
+    url: raw.url,
+    ...(raw.type ? { type: raw.type } : {}),
+    genres: raw.genres ?? [],
+    ...channelOf(raw),
   };
 }
 
@@ -346,6 +360,17 @@ export function normalizeCrewCredit(raw: RawCrewCredit): CastCredit {
     person_url: raw.person.url,
     person_id: raw.person.id,
     ...(raw.type ? { credit_type: raw.type } : {}),
+    ...(raw.person.image?.original ? { person_image_url: raw.person.image.original } : {}),
+  };
+}
+
+/** Normalize an episode guest-crew row — `{ person, guestCrewType }`, keyed differently from show crew. */
+export function normalizeGuestCrewCredit(raw: RawGuestCrewCredit): CastCredit {
+  return {
+    person_name: raw.person.name,
+    person_url: raw.person.url,
+    person_id: raw.person.id,
+    ...(raw.guestCrewType ? { credit_type: raw.guestCrewType } : {}),
     ...(raw.person.image?.original ? { person_image_url: raw.person.image.original } : {}),
   };
 }
@@ -570,8 +595,7 @@ export class TvmazeService {
 
   /**
    * One season's episodes. This route always includes specials and ignores
-   * `?specials=1`, so the caller filters locally to keep one contract with the
-   * whole-run route.
+   * `?specials=1`; like every episode route here, the caller filters them.
    */
   async getSeasonEpisodes(
     seasonId: number,
@@ -586,20 +610,38 @@ export class TvmazeService {
     return rows ? rows.map((row) => normalizeEpisode(row, timeZone)) : null;
   }
 
-  /** A show's whole run. Excludes specials unless `includeSpecials` is set. */
-  async getShowEpisodes(
-    showId: number,
-    timeZone: string,
-    ctx: Context,
-    includeSpecials: boolean,
-  ): Promise<Episode[] | null> {
-    const path = includeSpecials
-      ? `/shows/${showId}/episodes?specials=1`
-      : `/shows/${showId}/episodes`;
-    const rows = await this.fetchJson<RawEpisode[]>(path, ctx, {
+  /**
+   * A show's whole run, specials included. `?specials=1` is a strict superset
+   * of the default response — its regular rows are the default route's, in
+   * the same order — so asking for it always lets the caller filter locally and
+   * count what it dropped, and both settings of the filter share one cache entry.
+   */
+  async getShowEpisodes(showId: number, timeZone: string, ctx: Context): Promise<Episode[] | null> {
+    const rows = await this.fetchJson<RawEpisode[]>(`/shows/${showId}/episodes?specials=1`, ctx, {
       operation: 'tvmaze.getShowEpisodes',
       notFoundAsNull: true,
     });
+    return rows ? rows.map((row) => normalizeEpisode(row, timeZone)) : null;
+  }
+
+  /**
+   * The episodes the source dates to one day — matched on its `airdate`, the
+   * broadcaster's programming day — specials included. The route answers the
+   * same 404 for a show that does not exist and for a date with nothing on it,
+   * so `null` means only "nothing here"; the caller tells the two apart from the
+   * show profile. A non-calendar date is a 422, re-thrown as `invalid_date`.
+   */
+  async getEpisodesByDate(
+    showId: number,
+    date: string,
+    timeZone: string,
+    ctx: Context,
+  ): Promise<Episode[] | null> {
+    const rows = await this.fetchJson<RawEpisode[]>(
+      `/shows/${showId}/episodesbydate?date=${encodeURIComponent(date)}`,
+      ctx,
+      { operation: 'tvmaze.getEpisodesByDate', notFoundAsNull: true },
+    );
     return rows ? rows.map((row) => normalizeEpisode(row, timeZone)) : null;
   }
 
@@ -637,7 +679,7 @@ export class TvmazeService {
       if (!show) continue;
       entries.push({
         ...normalizeEpisode(row, timeZone),
-        show: normalizeShow(show),
+        show: normalizeScheduleShow(show),
         feed: label,
       });
     }
@@ -673,6 +715,26 @@ export class TvmazeService {
       notFoundAsNull: true,
     });
     return rows ? rows.map(normalizeCastCredit) : null;
+  }
+
+  /**
+   * One episode's guest cast and guest crew, from a single request that embeds
+   * both. `null` when the episode does not exist.
+   */
+  async getEpisodeCredits(
+    episodeId: number,
+    ctx: Context,
+  ): Promise<{ cast: CastCredit[]; crew: CastCredit[] } | null> {
+    const raw = await this.fetchJson<RawEpisode>(
+      `/episodes/${episodeId}?embed[]=guestcast&embed[]=guestcrew`,
+      ctx,
+      { operation: 'tvmaze.getEpisodeCredits', notFoundAsNull: true },
+    );
+    if (!raw) return null;
+    return {
+      cast: (raw._embedded?.guestcast ?? []).map(normalizeCastCredit),
+      crew: (raw._embedded?.guestcrew ?? []).map(normalizeGuestCrewCredit),
+    };
   }
 
   // -------------------------------------------------------------------------

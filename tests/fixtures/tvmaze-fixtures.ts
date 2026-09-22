@@ -10,6 +10,7 @@ import type {
   RawCastCredit,
   RawCrewCredit,
   RawEpisode,
+  RawGuestCrewCredit,
   RawSearchHit,
   RawSeason,
   RawShow,
@@ -204,6 +205,54 @@ export function rawCrewCredit(overrides: Partial<RawCrewCredit> = {}): RawCrewCr
     },
     ...overrides,
   } as RawCrewCredit;
+}
+
+/**
+ * An episode guest-crew row from the `guestcrew` embed — `{ person, guestCrewType }`,
+ * not the show-crew `{ type, person }` shape (verified on episode 2939679).
+ */
+export function rawGuestCrewCredit(
+  overrides: Partial<RawGuestCrewCredit> = {},
+): RawGuestCrewCredit {
+  return {
+    guestCrewType: 'Director',
+    person: {
+      id: 39_582,
+      url: 'https://www.tvmaze.com/people/39582/ben-stiller',
+      name: 'Ben Stiller',
+      image: {
+        medium: 'https://static.tvmaze.com/uploads/images/medium_portrait/10/25671.jpg',
+        original: 'https://static.tvmaze.com/uploads/images/original_untouched/10/25671.jpg',
+      },
+    },
+    ...overrides,
+  } as RawGuestCrewCredit;
+}
+
+/** `count` distinct cast rows, person ids `firstId`, `firstId + 1`, … in order. */
+export function rawCastCredits(count: number, firstId = 1): RawCastCredit[] {
+  return Array.from({ length: count }, (_, index) =>
+    rawCastCredit({
+      person: {
+        id: firstId + index,
+        url: `https://www.tvmaze.com/people/${firstId + index}/performer`,
+        name: `Performer ${firstId + index}`,
+      },
+    }),
+  );
+}
+
+/** `count` distinct crew rows, person ids `firstId`, `firstId + 1`, … in order. */
+export function rawCrewCredits(count: number, firstId = 1000): RawCrewCredit[] {
+  return Array.from({ length: count }, (_, index) =>
+    rawCrewCredit({
+      person: {
+        id: firstId + index,
+        url: `https://www.tvmaze.com/people/${firstId + index}/crew-member`,
+        name: `Crew ${firstId + index}`,
+      },
+    }),
+  );
 }
 
 /** The upstream JSON error envelope TVmaze returns for a non-2xx. */
