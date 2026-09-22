@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "tvmaze-mcp-server",
   "display_name": "tvmaze-mcp-server",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "Search TVmaze shows, next episodes in your timezone, episode guides, daily TV schedules, and cast via MCP. STDIO or Streamable HTTP.",
   "author": {
     "name": "cyanheads",
