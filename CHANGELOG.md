@@ -2,6 +2,10 @@
 
 All notable changes to this project. Each entry links to its full per-version file in [changelog/](changelog/).
 
+## [0.2.1](changelog/0.2.x/0.2.1.md) — 2026-10-08
+
+Framework 0.13.6 → 0.13.14: tool arguments sent as numeric or boolean strings, or null for an optional field, are repaired before validation (0.13.14), tool errors carry a request id (0.13.10), server.json registry entries start the right transport, and the Docker image installs dependencies on the build platform.
+
 ## [0.2.0](changelog/0.2.x/0.2.0.md) — 2026-09-22 · ⚠️ Breaking
 
 Paged tvmaze_get_cast and compact tvmaze_get_schedule show rows are breaking output changes; adds air_date episode lookup and episode guest crew.
