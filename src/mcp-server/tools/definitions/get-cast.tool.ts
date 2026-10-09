@@ -159,7 +159,6 @@ export const getCast = tool('tvmaze_get_cast', {
       if (showCast === null) {
         throw ctx.fail('show_not_found', `No TVmaze show has id ${input.show_id}.`, {
           show_id: input.show_id,
-          ...ctx.recoveryFor('show_not_found'),
         });
       }
       cast = showCast;
@@ -178,7 +177,6 @@ export const getCast = tool('tvmaze_get_cast', {
       if (credits === null) {
         throw ctx.fail('episode_not_found', `No TVmaze episode has id ${input.episode_id}.`, {
           episode_id: input.episode_id,
-          ...ctx.recoveryFor('episode_not_found'),
         });
       }
       cast = Array.isArray(credits) ? credits : credits.cast;

@@ -163,7 +163,7 @@ export const getEpisodes = tool('tvmaze_get_episodes', {
 
   async handler(input, ctx) {
     const service = getTvmazeService();
-    const timezone = service.resolveTimezone(input.timezone, ctx);
+    const timezone = service.resolveTimezone(input.timezone);
 
     // The season arm needs the profile first, to map the season number onto
     // the season id its route takes; the other two arms fetch alongside it.
@@ -180,7 +180,6 @@ export const getEpisodes = tool('tvmaze_get_episodes', {
     if (!profile) {
       throw ctx.fail('show_not_found', `No TVmaze show has id ${input.show_id}.`, {
         show_id: input.show_id,
-        ...ctx.recoveryFor('show_not_found'),
       });
     }
     const show = profile.show;
@@ -194,7 +193,7 @@ export const getEpisodes = tool('tvmaze_get_episodes', {
         throw ctx.fail(
           'season_not_found',
           `Season ${input.season} not found for ${show.name}. Available seasons: ${describeSeasons(profile.seasons)}.`,
-          { show_id: input.show_id, season: input.season, ...ctx.recoveryFor('season_not_found') },
+          { show_id: input.show_id, season: input.season },
         );
       }
       all = (await service.getSeasonEpisodes(season.id, timezone, ctx)) ?? [];

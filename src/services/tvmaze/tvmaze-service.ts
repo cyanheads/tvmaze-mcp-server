@@ -159,14 +159,14 @@ export function stripHtml(html: string): string {
  * `Intl.DateTimeFormat` throws `RangeError` on an unknown zone, which doubles
  * as the validator — no timezone library is involved.
  */
-export function assertTimezone(timeZone: string, ctx: Context): string {
+export function assertTimezone(timeZone: string): string {
   try {
     new Intl.DateTimeFormat('en-US', { timeZone });
     return timeZone;
   } catch (error) {
     throw validationError(
       `"${timeZone}" is not an IANA timezone name this runtime recognizes.`,
-      { reason: 'invalid_timezone', ...ctx.recoveryFor('invalid_timezone') },
+      { reason: 'invalid_timezone' },
       { cause: error },
     );
   }
@@ -496,8 +496,8 @@ export class TvmazeService {
   }
 
   /** The IANA zone a tool call resolves to — the caller's, or the configured default. */
-  resolveTimezone(requested: string | undefined, ctx: Context): string {
-    return assertTimezone(requested?.trim() || this.defaultTimezone, ctx);
+  resolveTimezone(requested: string | undefined): string {
+    return assertTimezone(requested?.trim() || this.defaultTimezone);
   }
 
   /** The ISO 3166-1 alpha-2 country a schedule call resolves to. */
@@ -801,7 +801,7 @@ export class TvmazeService {
       this.cache.set(url, value);
       return value;
     } catch (error) {
-      return this.classifyFailure(error, ctx, options);
+      return this.classifyFailure(error, options);
     }
   }
 
@@ -811,19 +811,15 @@ export class TvmazeService {
    * lexically inside a handler, which is the only place the error-contract
    * lints can see it.
    */
-  private classifyFailure(error: unknown, ctx: Context, options: RequestOptions): null {
+  private classifyFailure(error: unknown, options: RequestOptions): null {
     if (error instanceof McpError) {
       const status = error.data?.status;
       if (status === 404 && options.notFoundAsNull) return null;
-      if (status === 422) throw this.upstreamRejection(error, ctx);
+      if (status === 422) throw this.upstreamRejection(error);
       if (options.unavailableReason && TRANSIENT_CODES.has(error.code)) {
         throw serviceUnavailable(
           error.message,
-          {
-            reason: options.unavailableReason,
-            retryable: true,
-            ...ctx.recoveryFor(options.unavailableReason),
-          },
+          { reason: options.unavailableReason, retryable: true },
           { cause: error },
         );
       }
@@ -833,11 +829,7 @@ export class TvmazeService {
     if (options.unavailableReason) {
       throw serviceUnavailable(
         `TVmaze did not answer: ${error instanceof Error ? error.message : String(error)}`,
-        {
-          reason: options.unavailableReason,
-          retryable: true,
-          ...ctx.recoveryFor(options.unavailableReason),
-        },
+        { reason: options.unavailableReason, retryable: true },
         { cause: error },
       );
     }
@@ -847,20 +839,21 @@ export class TvmazeService {
   /**
    * TVmaze answers an unrecognized country or a non-calendar date with 422 and
    * a body naming which one. The rejection is re-thrown carrying the calling
-   * tool's contract reason so the recovery hint reaches both client surfaces.
+   * tool's contract reason, from which the framework fills the declared
+   * recovery hint on both client surfaces.
    */
-  private upstreamRejection(error: McpError, ctx: Context): McpError {
+  private upstreamRejection(error: McpError): McpError {
     const body = typeof error.data?.body === 'string' ? error.data.body : '';
     if (/country/i.test(body)) {
       return validationError(
         'TVmaze rejected the country code — it is not an ISO 3166-1 country the source recognizes.',
-        { reason: 'invalid_country', ...ctx.recoveryFor('invalid_country') },
+        { reason: 'invalid_country' },
         { cause: error },
       );
     }
     return validationError(
       'TVmaze rejected the date — it is not a real calendar date.',
-      { reason: 'invalid_date', ...ctx.recoveryFor('invalid_date') },
+      { reason: 'invalid_date' },
       { cause: error },
     );
   }

@@ -98,7 +98,7 @@ export const getNextEpisode = tool('tvmaze_get_next_episode', {
 
   async handler(input, ctx) {
     const service = getTvmazeService();
-    const timezone = service.resolveTimezone(input.timezone, ctx);
+    const timezone = service.resolveTimezone(input.timezone);
 
     const detail =
       input.by === 'id'
@@ -109,7 +109,6 @@ export const getNextEpisode = tool('tvmaze_get_next_episode', {
       if (input.by === 'id') {
         throw ctx.fail('show_not_found_by_id', `No TVmaze show has id ${input.show_id}.`, {
           show_id: input.show_id,
-          ...ctx.recoveryFor('show_not_found_by_id'),
         });
       }
       ctx.log.info('Title did not resolve to a show', { title: input.title });

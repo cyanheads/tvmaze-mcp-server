@@ -152,7 +152,7 @@ export const getSchedule = tool('tvmaze_get_schedule', {
 
   async handler(input, ctx) {
     const service = getTvmazeService();
-    const timezone = service.resolveTimezone(input.timezone, ctx);
+    const timezone = service.resolveTimezone(input.timezone);
     const date = input.date ?? todayIn(timezone);
 
     const explicitCountry = input.country?.trim() ? normalizeCountry(input.country) : undefined;

@@ -161,14 +161,12 @@ describe('normalizeCountry', () => {
 
 describe('assertTimezone', () => {
   it('returns a valid IANA zone name unchanged', () => {
-    const ctx = createMockContext();
-    expect(assertTimezone('America/Los_Angeles', ctx)).toBe('America/Los_Angeles');
+    expect(assertTimezone('America/Los_Angeles')).toBe('America/Los_Angeles');
   });
 
   it('throws a validationError with reason invalid_timezone for a bogus zone', () => {
-    const ctx = createMockContext();
     try {
-      assertTimezone('Not/AZone', ctx);
+      assertTimezone('Not/AZone');
       throw new Error('expected assertTimezone to throw');
     } catch (error) {
       expect(error).toMatchObject({ data: { reason: 'invalid_timezone' } });

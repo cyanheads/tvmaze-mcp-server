@@ -99,13 +99,12 @@ export const getShow = tool('tvmaze_get_show', {
 
   async handler(input, ctx) {
     const service = getTvmazeService();
-    const timezone = service.resolveTimezone(input.timezone, ctx);
+    const timezone = service.resolveTimezone(input.timezone);
     const detail = await service.getShowDetail(input.show_id, timezone, ctx, { seasons: true });
 
     if (!detail) {
       throw ctx.fail('show_not_found', `No TVmaze show has id ${input.show_id}.`, {
         show_id: input.show_id,
-        ...ctx.recoveryFor('show_not_found'),
       });
     }
 
