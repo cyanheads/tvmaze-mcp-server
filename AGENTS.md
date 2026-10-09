@@ -2,10 +2,10 @@
 
 **Server:** tvmaze-mcp-server
 **Version:** 0.2.0
-**Framework:** [@cyanheads/mcp-ts-core](https://www.npmjs.com/package/@cyanheads/mcp-ts-core) `^0.13.6`
+**Framework:** [@cyanheads/mcp-ts-core](https://www.npmjs.com/package/@cyanheads/mcp-ts-core) `^0.13.14`
 **Engines:** Bun ≥1.4.0, Node ≥24.0.0
-**MCP SDK:** `@modelcontextprotocol/server` ^2.0.0
-**Zod:** ^4.4.3
+**MCP SDK:** `@modelcontextprotocol/server` ^2.2.0
+**Zod:** ^4.6.5
 
 > **Read the framework docs first:** `node_modules/@cyanheads/mcp-ts-core/CLAUDE.md` contains the full API reference — builders, Context, error codes, exports, patterns. This file covers server-specific conventions only.
 
@@ -249,14 +249,14 @@ Handlers receive a unified `ctx` object. Key properties:
 |:---------|:------------|
 | `ctx.log` | Request-scoped logger — `.debug()`, `.info()`, `.notice()`, `.warning()`, `.error()`. Auto-correlates requestId, traceId, tenantId. Dual-sink: Pino **and** `notifications/message` to the client, so treat it as client-visible. |
 | `ctx.enrich` | Success-path agent context (empty-result notices, query echo, pagination totals) — `ctx.enrich(...)` or `.notice()` / `.total()` / `.echo()` / `.truncated()`. Reaches `structuredContent` and `content[]`; lands only when the definition declares an `enrichment` block (no-op otherwise). |
-| `ctx.fail` / `ctx.recoveryFor` | Typed throw against the tool's own `errors[]` reason union, and the declared recovery hint to forward as the throw's data. See Errors. |
+| `ctx.fail` / `ctx.recoveryFor` | Typed throw against the tool's own `errors[]` reason union — the framework fills the declared recovery hint — and that hint as data, for building an explicit override. See Errors. |
 | `ctx.signal` | `AbortSignal` for cancellation — handed to `withRetry` and `fetchWithTimeout` inside `TvmazeService`. |
-| `ctx.requestId` | Unique request ID. |
+| `ctx.requestId` | Request ID — the one every log record of the call carries and its error envelope returns as `data.requestId`. |
 | `ctx.tenantId` | Tenant ID from JWT; `'default'` for stdio or HTTP with auth off. |
 
 **What this server deliberately does not use.** `ctx.state` is tenant-scoped by design, which is right for tenant data and wrong for this cache: TVmaze responses are public and identical for every tenant, and the reason to cache them is to collapse identical bursts onto one shared egress rate budget — a tenant-scoped store would hold N copies and collapse nothing. The response cache therefore lives in `TvmazeService`. Tenant data, if any is ever stored, still goes through `ctx.state` and never straight to persistence.
 
-`ctx.requestInput` / `ctx.inputs` are unused — no handler asks the caller for input mid-flight, which is why `createApp()` can declare a plain `sessionMode: 'stateless'` rather than `require: 'stateful'`. Adding an elicitation to any tool means revisiting that declaration. `ctx.content` is unused as well: every response is text plus `structuredContent`, and image URLs are returned as fields, not as image blocks. The framework CLAUDE.md carries the full signatures for all four.
+`ctx.requestInput` / `ctx.inputs` / `ctx.clientCapabilities` are unused — no handler asks the caller for input mid-flight, which is why `createApp()` can declare a plain `sessionMode: 'stateless'` rather than `require: 'stateful'`. Adding an elicitation to any tool means revisiting that declaration. `ctx.content` is unused as well: every response is text plus `structuredContent`, and image URLs are returned as fields, not as image blocks. The framework CLAUDE.md carries the full signatures for all five.
 
 ---
 
@@ -264,7 +264,7 @@ Handlers receive a unified `ctx` object. Key properties:
 
 Handlers throw — the framework catches, classifies, and formats.
 
-**Recommended: typed error contract.** Declare `errors: [{ reason, code, when, recovery, retryable?, severity?, thrownBy? }]` on `tool()` / `resource()` to receive `ctx.fail(reason, …)` typed against the reason union. TypeScript catches typos at compile time, `data.reason` is auto-populated for observability, linter enforces conformance against the handler body. `recovery` is required (≥ 5 words, lint-validated) — the single source of truth for the agent's next move. Pass `ctx.recoveryFor('reason')` as the throw's data to put it on the wire (`data.recovery.hint`, mirrored into `content[]` text unless the message already contains it verbatim); override with an explicit `{ recovery: { hint: '...' } }` when dynamic runtime context matters. Forwarding it is lint-enforced per throw site (`error-contract-recovery-unforwarded`). Mark an entry the service layer throws with `thrownBy: 'service'` so `error-contract-unthrown` skips it — lint-only metadata, nothing at runtime reads it. Baseline codes (`InternalError`, `ServiceUnavailable`, `Timeout`, `ValidationError`, `SerializationError`, `RequestCancelled`) bubble freely and don't need declaring.
+**Recommended: typed error contract.** Declare `errors: [{ reason, code, when, recovery, retryable?, severity?, thrownBy? }]` on `tool()` / `resource()` to receive `ctx.fail(reason, …)` typed against the reason union. TypeScript catches typos at compile time, `data.reason` is auto-populated for observability, linter enforces conformance against the handler body. `recovery` is required (≥ 5 words, lint-validated) — the single source of truth for the agent's next move. The framework puts it on the wire whenever a failure carrying that `reason` arrives without a hint — a bare `ctx.fail('reason')` or a service throw with `data: { reason }` — as `data.recovery.hint`, mirrored into `content[]` text unless the message already contains it verbatim; override with an explicit `{ recovery: { hint: '...' } }` when dynamic runtime context matters. Every error envelope also carries `data.requestId`, the id the server's log records for that call carry, and `content[]` closes with `(reason … · request <id>)`. Mark an entry the service layer throws with `thrownBy: 'service'` so `error-contract-unthrown` skips it — lint-only metadata, nothing at runtime reads it. Baseline codes (`InternalError`, `ServiceUnavailable`, `Timeout`, `ValidationError`, `SerializationError`, `RequestCancelled`) bubble freely and don't need declaring.
 
 ```ts
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
@@ -279,14 +279,13 @@ async handler(input, ctx) {
   if (!detail) {
     throw ctx.fail('show_not_found', `No TVmaze show has id ${input.show_id}.`, {
       show_id: input.show_id,
-      ...ctx.recoveryFor('show_not_found'),
     });
   }
   return { ...detail, timezone };
 }
 ```
 
-**A 404 becomes `null` in the service, not a throw.** Every by-id fetch method returns `T | null`, so the handler decides what a miss means — a typed `ctx.fail` where the caller supplied an id, or a `{ found: false, guidance }` result where resolving an identifier was the tool's whole job (`tvmaze_lookup_show`, the title arm of `tvmaze_get_next_episode`). That keeps every `ctx.fail` lexically inside a handler, the only place the `error-contract-unthrown` and `error-contract-recovery-unforwarded` lints can see it. Where the service must throw from below a handler — an upstream 422, an unknown IANA zone — it re-throws through an error factory carrying the calling tool's `reason` plus `ctx.recoveryFor(reason)`, and the matching contract entry carries `thrownBy: 'service'`.
+**A 404 becomes `null` in the service, not a throw.** Every by-id fetch method returns `T | null`, so the handler decides what a miss means — a typed `ctx.fail` where the caller supplied an id, or a `{ found: false, guidance }` result where resolving an identifier was the tool's whole job (`tvmaze_lookup_show`, the title arm of `tvmaze_get_next_episode`). That keeps every `ctx.fail` lexically inside a handler, the only place the `error-contract-unthrown` lint can see it. Where the service must throw from below a handler — an upstream 422, an unknown IANA zone — it re-throws through an error factory carrying the calling tool's `reason`, from which the framework fills the declared recovery hint, and the matching contract entry carries `thrownBy: 'service'`.
 
 **Declare contracts inline on each tool.** The contract is part of the tool's public surface — one file should give the full picture. Don't extract a shared `errors[]` constant; per-tool repetition is the intended cost of locality.
 
@@ -460,7 +459,7 @@ security: false                            # optional — true ONLY for a source
 
 ## Publishing
 
-**Every release goes through a release PR, straight-through** — `git-wrapup`'s "Release PR mode", mode `straight-through`. One run: `git-wrapup` lands the commit stack on `release/<version>`, pushes it, and opens the PR (title = the release commit subject, body = the changelog entry plus a gates section); `release-and-publish` then fast-forwards `main` locally with `git merge --ff-only`, creates the tag on `main`'s tip, pushes `main` and the tag, deletes the branch, and publishes. A caller's brief may run a given release as `gated` instead — a `release-pr-review` pass on the open PR before `release-and-publish`. **Never merge through the GitHub UI or `gh pr merge`**: squash and rebase-merge are disabled in the repo settings because both rewrite the stack (rebase-merge also strips the SSH signatures), and a merge commit breaks the linear history.
+**Every release goes through a release PR, straight-through** — `git-wrapup`'s "Release PR mode", mode `straight-through`. One run: `git-wrapup` lands the commit stack on `release/<version>`, pushes it, and opens the PR (title = the release commit subject, body = the release digest: theme line, `## Changes`, `## Gates`, changelog link last); `release-and-publish` then fast-forwards `main` locally with `git merge --ff-only`, creates the tag on `main`'s tip, pushes `main` and the tag, deletes the branch, and publishes. A caller's brief may run a given release as `gated` instead — a `release-pr-review` pass on the open PR before `release-and-publish`. **Never merge through the GitHub UI or `gh pr merge`**: squash and rebase-merge are disabled in the repo settings because both rewrite the stack (rebase-merge also strips the SSH signatures), and a merge commit breaks the linear history.
 
 ---
 
