@@ -2,6 +2,10 @@
 
 All notable changes to this project. Each entry links to its full per-version file in [changelog/](changelog/).
 
+## [0.3.0](changelog/0.3.x/0.3.0.md) — 2026-10-16
+
+Discover people and focus TVmaze listings while preserving literal names.
+
 ## [0.2.1](changelog/0.2.x/0.2.1.md) — 2026-10-08
 
 Framework 0.13.6 → 0.13.14: tool arguments sent as numeric or boolean strings, or null for an optional field, are repaired before validation (0.13.14), tool errors carry a request id (0.13.10), server.json registry entries start the right transport, and the Docker image installs dependencies on the build platform.

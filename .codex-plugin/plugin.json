@@ -1,6 +1,6 @@
 {
   "name": "tvmaze-mcp-server",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "TVmaze shows, people, next episodes in your timezone, episode guides, schedules, and credits.",
   "author": {
     "name": "Casey Hand",

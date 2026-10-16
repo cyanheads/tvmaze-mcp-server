@@ -1,6 +1,6 @@
 # tvmaze-mcp-server - Directory Structure
 
-Generated on: 2026-10-16 14:10:18
+Generated on: 2026-10-16 14:29:14
 
 ```text
 tvmaze-mcp-server/
@@ -26,6 +26,7 @@ tvmaze-mcp-server/
 ├── changelog/
 │   ├── 0.1.x/
 │   ├── 0.2.x/
+│   ├── 0.3.x/
 │   └── template.md
 ├── docs/
 │   └── design.md
