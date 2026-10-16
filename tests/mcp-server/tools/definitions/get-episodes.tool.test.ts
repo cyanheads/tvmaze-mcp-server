@@ -260,6 +260,15 @@ describe('tvmaze_get_episodes', () => {
   });
 
   describe('page size on a cursor call', () => {
+    it('clamps an oversized episode request and reports a short page honestly', async () => {
+      routeRun(3);
+      const result = await runToolContract(getEpisodes, { show_id: 169, limit: 500 });
+      expect(result.structuredContent).toMatchObject({ shown: 3, cap: 250, has_more: false });
+      expect(result.structuredContent).not.toHaveProperty('truncated');
+      expect(result.content.map((block) => (block as { text: string }).text).join('\n')).toContain(
+        'returned 3 episodes',
+      );
+    });
     /** A whole run of `count` regular episodes, ids 1..count in airing order. */
     function routeRun(count: number) {
       getHttp().route({

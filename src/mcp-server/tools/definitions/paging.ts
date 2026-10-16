@@ -25,6 +25,8 @@ export interface Page<T> {
   nextCursor?: string;
   /** Zero-based position of `items[0]` in the full list. */
   offset: number;
+  /** Page size requested before applying the ceiling. */
+  requestedLimit: number;
   /** Length of the full list. */
   total: number;
 }
@@ -40,12 +42,15 @@ export function pageOf<T>(
   limit: number,
   ctx: Context,
 ): Page<T> {
+  const requestedLimit = limit;
+  limit = Math.min(limit, MAX_PAGE_SIZE);
   const offset = cursor ? decodeCursor(cursor, ctx).offset : 0;
   const slice = items.slice(offset, offset + limit);
   const end = offset + slice.length;
   return {
     items: slice,
     limit,
+    requestedLimit,
     offset,
     total: items.length,
     ...(end < items.length ? { nextCursor: encodeCursor({ offset: end, limit }) } : {}),
@@ -53,8 +58,8 @@ export function pageOf<T>(
 }
 
 /**
- * Write the page's enrichment: `totalCount` always; `truncated` / `shown` /
- * `cap` when more rows follow. `ctx.enrich.notice` is last-wins, so the
+ * Write `totalCount` always, `shown` / `cap` when clamped or more rows follow,
+ * and `truncated` only when more rows follow. `ctx.enrich.notice` is last-wins, so the
  * truncation guidance and the tool's own `fragments` are joined into one
  * notice here instead of each being written separately.
  */
@@ -65,6 +70,13 @@ export function enrichPage(
   fragments: readonly string[] = [],
 ): void {
   ctx.enrich.total(page.total);
+  const notices = [...fragments];
+  if (page.requestedLimit > page.limit) {
+    ctx.enrich({ shown: page.items.length, cap: page.limit });
+    notices.unshift(
+      `Requested limit ${page.requestedLimit} exceeds the cap ${page.limit}; returned ${page.items.length} ${noun}.`,
+    );
+  }
   if (page.nextCursor) {
     const first = page.offset + 1;
     const last = page.offset + page.items.length;
@@ -72,9 +84,9 @@ export function enrichPage(
     ctx.enrich.truncated({
       shown: page.items.length,
       cap: page.limit,
-      guidance: [guidance, ...fragments].join(' '),
+      guidance: [guidance, ...notices].join(' '),
     });
-  } else if (fragments.length > 0) {
-    ctx.enrich.notice(fragments.join(' '));
+  } else if (notices.length > 0) {
+    ctx.enrich.notice(notices.join(' '));
   }
 }

@@ -27,6 +27,149 @@ import {
 const getHttp = installTvmazeToolHarness();
 
 describe('tvmaze_get_cast', () => {
+  it('finds crew-only roles, keeps crew present, and suggests crew only when excluded', async () => {
+    getHttp().route({
+      match: `${TVMAZE_TEST_BASE_URL}/shows/169/cast`,
+      respond: () => Response.json([rawCastCredit({ character: null })]),
+    });
+    getHttp().route({
+      match: `${TVMAZE_TEST_BASE_URL}/shows/169/crew`,
+      respond: () => Response.json([rawCrewCredit()]),
+    });
+    const missing = await runToolContract(getCast, {
+      scope: 'show',
+      show_id: 169,
+      name: 'executive',
+    });
+    expect(missing.structuredContent).toMatchObject({
+      cast: [],
+      cast_total: 0,
+      totalCount: 0,
+      notice: expect.stringContaining('include_crew: true'),
+    });
+    expect(getHttp().calls).toHaveLength(1);
+    const result = await runToolContract(getCast, {
+      scope: 'show',
+      show_id: 169,
+      name: 'executive',
+      include_crew: true,
+    });
+    expect(result.structuredContent).toMatchObject({
+      cast: [],
+      crew: [{ credit_type: 'Executive Producer' }],
+      cast_total: 0,
+      crew_total: 1,
+      totalCount: 1,
+    });
+    const person = await runToolContract(getCast, { scope: 'show', show_id: 169, name: 'BRYAN' });
+    expect(person.structuredContent).toMatchObject({
+      cast: [{ person_name: 'Bryan Cranston' }],
+      totalCount: 1,
+    });
+    const past = await runToolContract(getCast, {
+      scope: 'show',
+      show_id: 169,
+      name: 'BRYAN',
+      cursor: encodeCursor({ offset: 10, limit: 1 }),
+    });
+    expect(past.structuredContent).toMatchObject({ cast: [], totalCount: 1 });
+    expect(past.structuredContent).not.toHaveProperty('notice');
+  });
+  it.each(['show', 'episode'] as const)(
+    'filters %s credits before splitting cast and crew pages',
+    async (scope) => {
+      const cast = [
+        rawCastCredit(),
+        rawCastCredit({
+          person: { id: 2, name: 'Other', url: 'https://x/2' },
+          character: { id: 2, name: 'Other', url: 'https://x/c2' },
+        }),
+      ];
+      const crew = [rawCrewCredit({ type: 'Walter director' })];
+      if (scope === 'show') {
+        getHttp().route({
+          match: `${TVMAZE_TEST_BASE_URL}/shows/169/cast`,
+          respond: () => Response.json(cast),
+        });
+        getHttp().route({
+          match: `${TVMAZE_TEST_BASE_URL}/shows/169/crew`,
+          respond: () => Response.json(crew),
+        });
+      } else {
+        getHttp().route({
+          match: `${TVMAZE_TEST_BASE_URL}/episodes/11?embed[]=guestcast&embed[]=guestcrew`,
+          respond: () =>
+            Response.json({
+              id: 11,
+              _embedded: {
+                guestcast: cast,
+                guestcrew: [rawGuestCrewCredit({ guestCrewType: 'Walter director' })],
+              },
+            }),
+        });
+      }
+      const subject = scope === 'show' ? { scope, show_id: 169 } : { scope, episode_id: 11 };
+      const input = { ...subject, include_crew: true, name: ' WALTER ', limit: 1 };
+      const first = await runToolContract(getCast, input);
+      expect(first.structuredContent).toMatchObject({
+        cast: [{ character_name: 'Walter White' }],
+        crew: [],
+        cast_total: 1,
+        crew_total: 1,
+        totalCount: 2,
+      });
+      const next = await runToolContract(getCast, {
+        ...input,
+        cursor: (first.structuredContent as { next_cursor: string }).next_cursor,
+      });
+      expect(next.structuredContent).toMatchObject({
+        cast: [],
+        crew: [{ credit_type: 'Walter director' }],
+        totalCount: 2,
+      });
+      const miss = await runToolContract(getCast, { ...input, name: 'missing' });
+      expect(miss.structuredContent).toMatchObject({
+        cast_total: 0,
+        crew_total: 0,
+        totalCount: 0,
+        notice: expect.stringContaining('No credits match'),
+      });
+      expect((miss.structuredContent as { notice: string }).notice).not.toContain(
+        'No cast is recorded',
+      );
+      const blank = await runToolContract(getCast, { ...input, name: ' ', limit: 50 });
+      expect(blank.structuredContent).toMatchObject({ cast_total: 2, crew_total: 1 });
+    },
+  );
+  it.each(['show', 'episode'] as const)(
+    'clamps oversized %s pages with honest short and past-end counts',
+    async (scope) => {
+      const path = scope === 'show' ? '/shows/169/cast' : '/episodes/11/guestcast';
+      getHttp().route({
+        match: `${TVMAZE_TEST_BASE_URL}${path}`,
+        respond: () => Response.json(rawCastCredits(3)),
+      });
+      const subject = scope === 'show' ? { scope, show_id: 169 } : { scope, episode_id: 11 };
+      for (const offset of [0, 500]) {
+        const result = await runToolContract(getCast, {
+          ...subject,
+          limit: 500,
+          cursor: encodeCursor({ offset, limit: 2 }),
+        });
+        const shown = offset === 0 ? 3 : 0;
+        expect(result.structuredContent).toMatchObject({
+          shown,
+          cap: 250,
+          has_more: false,
+          totalCount: 3,
+        });
+        expect(result.structuredContent).not.toHaveProperty('truncated');
+        expect(
+          result.content.map((block) => (block as { text: string }).text).join('\n'),
+        ).toContain(`returned ${shown} credits`);
+      }
+    },
+  );
   it('lists the main cast for scope "show" without crew by default', async () => {
     getHttp().route({
       match: `${TVMAZE_TEST_BASE_URL}/shows/169/cast`,
@@ -285,9 +428,9 @@ describe('tvmaze_get_cast', () => {
       expect(textOf(result)).not.toMatch(/## Cast\nNot available/);
     });
 
-    it('rejects a limit outside 1–250', async () => {
+    it('rejects a nonpositive or fractional limit', async () => {
       routeShow(3, 0);
-      for (const limit of [0, 251]) {
+      for (const limit of [0, -1, 1.5]) {
         const result = await runToolContract(getCast, { scope: 'show', show_id: 169, limit });
         expect(result.isError).toBe(true);
         expect((result.content[0] as { text: string }).text).toContain('limit');

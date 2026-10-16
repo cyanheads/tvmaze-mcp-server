@@ -14,6 +14,7 @@ import { getEpisodes } from '@/mcp-server/tools/definitions/get-episodes.tool.js
 import { getNextEpisode } from '@/mcp-server/tools/definitions/get-next-episode.tool.js';
 import { getSchedule } from '@/mcp-server/tools/definitions/get-schedule.tool.js';
 import { getShow } from '@/mcp-server/tools/definitions/get-show.tool.js';
+import { field, inline, summaryLines } from '@/mcp-server/tools/definitions/shared-schemas.js';
 import {
   rawEpisode,
   rawSeason,
@@ -30,6 +31,70 @@ const getHttp = installTvmazeToolHarness();
 const EMBED_QS = 'embed[]=nextepisode&embed[]=previousepisode&embed[]=seasons';
 
 describe('tvmaze_get_show', () => {
+  it('renders literal Markdown names while preserving summary emphasis and raw URLs', () => {
+    expect(inline('M*A*S*H [x] \\ <i>')).toBe('M\\*A\\*S\\*H \\[x\\] \\\\ \\<i\\>');
+    expect(field('genres', ['M*A*S*H', '[Drama]'])).toBe('**genres:** M\\*A\\*S\\*H, \\[Drama\\]');
+    expect(field('url', 'https://example.test/a_b')).toBe('**url:** https://example.test/a_b');
+    expect(summaryLines('**Bold** and *italic*')).toEqual([
+      '**summary:**',
+      '> **Bold** and *italic*',
+    ]);
+  });
+  it.each([
+    {
+      network: null,
+      webChannel: { id: 2, name: 'Web', country: { timezone: 'Europe/London' } },
+      expected: 'Europe/London',
+    },
+    {
+      network: { id: 1, name: 'Network', country: { timezone: 'America/New_York' } },
+      webChannel: { id: 2, name: '', country: { timezone: 'Europe/London' } },
+      expected: 'America/New_York',
+    },
+    {
+      network: { id: 1, name: '', country: { timezone: 'America/New_York' } },
+      webChannel: null,
+      expected: undefined,
+    },
+    {
+      network: { id: 1, name: 'Network', country: { timezone: 'America/New_York' } },
+      webChannel: null,
+      expected: 'America/New_York',
+    },
+    {
+      network: { id: 1, name: 'Network', country: { timezone: 'America/New_York' } },
+      webChannel: { id: 2, name: 'Web', country: { timezone: 'Europe/London' } },
+      expected: 'Europe/London',
+    },
+    {
+      network: { id: 1, name: 'Network', country: { timezone: 'America/New_York' } },
+      webChannel: { id: 2, name: 'Web', country: null },
+      expected: undefined,
+    },
+    { network: null, webChannel: null, expected: undefined },
+  ])(
+    'reports only the selected channel timezone ($expected)',
+    async ({ network, webChannel, expected }) => {
+      getHttp().route({
+        match: `${TVMAZE_TEST_BASE_URL}/shows/169?${EMBED_QS}`,
+        respond: Response.json(
+          rawShow({
+            network,
+            webChannel,
+            schedule: { time: '', days: [] },
+            _embedded: { seasons: [] },
+          }),
+        ),
+      });
+      const result = await runToolContract(getShow, { show_id: 169 });
+      const show = (result.structuredContent as { show: Record<string, unknown> }).show;
+      expect(show.schedule_timezone).toBe(expected);
+      expect(show).not.toHaveProperty('schedule_time');
+      expect((result.content[0] as { text: string }).text).toContain(
+        `**schedule_timezone:** ${expected ? inline(expected) : 'Not available'}`,
+      );
+    },
+  );
   it('returns the full profile with seasons and next/previous episodes', async () => {
     getHttp().route({
       match: `${TVMAZE_TEST_BASE_URL}/shows/169?${EMBED_QS}`,

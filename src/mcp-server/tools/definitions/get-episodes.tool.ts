@@ -10,12 +10,13 @@ import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
 
 import { getTvmazeService } from '@/services/tvmaze/tvmaze-service.js';
 import type { Episode as EpisodeShape, Season as SeasonShape } from '@/services/tvmaze/types.js';
-import { DEFAULT_PAGE_SIZE, enrichPage, MAX_PAGE_SIZE, pageOf } from './paging.js';
+import { DEFAULT_PAGE_SIZE, enrichPage, pageOf } from './paging.js';
 import {
   Episode,
   episodeLines,
   field,
   inline,
+  noticeText,
   ShowSummary,
   showSummaryLines,
 } from './shared-schemas.js';
@@ -102,10 +103,9 @@ export const getEpisodes = tool('tvmaze_get_episodes', {
         .number()
         .int()
         .min(1)
-        .max(MAX_PAGE_SIZE)
         .default(DEFAULT_PAGE_SIZE)
         .describe(
-          'Maximum episodes to return in this call. Applies to every page, including a call that passes cursor. Raise it for a short series; the default keeps a long run inside a reasonable response size.',
+          'Maximum episodes to return in this call. Requests above 250 are clamped to 250. Applies to every page, including a call that passes cursor. Raise it for a short series; the default keeps a long run inside a reasonable response size.',
         ),
       cursor: z
         .string()
@@ -150,9 +150,12 @@ export const getEpisodes = tool('tvmaze_get_episodes', {
 
   enrichment: {
     totalCount: z.number().describe('Episodes matching before the page limit was applied.'),
-    truncated: z.boolean().optional().describe('True when the page limit was reached.'),
+    truncated: z.boolean().optional().describe('True when more matching episodes remain.'),
     shown: z.number().optional().describe('Number of episodes returned on this page.'),
-    cap: z.number().optional().describe('The page size applied to this call — its limit.'),
+    cap: z
+      .number()
+      .optional()
+      .describe('Applied page size, at most 250; present when clamped or more rows remain.'),
     notice: z
       .string()
       .optional()
@@ -160,6 +163,8 @@ export const getEpisodes = tool('tvmaze_get_episodes', {
         'Guidance when the page was truncated, when nothing was recorded, or when specials were filtered out — every one that applies, joined. Absent otherwise.',
       ),
   },
+
+  enrichmentTrailer: { notice: { render: noticeText } },
 
   async handler(input, ctx) {
     const service = getTvmazeService();

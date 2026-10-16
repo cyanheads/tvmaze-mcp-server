@@ -8,7 +8,14 @@ import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
 
 import { getTvmazeService } from '@/services/tvmaze/tvmaze-service.js';
-import { field, inline, ShowSummary, showSummaryLines, yearRange } from './shared-schemas.js';
+import {
+  field,
+  inline,
+  noticeText,
+  ShowSummary,
+  showSummaryLines,
+  yearRange,
+} from './shared-schemas.js';
 
 /** The source's fixed ceiling on `/search/shows`. There is no paging past it. */
 const SEARCH_RESULT_CAP = 10;
@@ -33,6 +40,7 @@ export const searchShows = tool('tvmaze_search_shows', {
   input: z.object({
     query: z
       .string()
+      .trim()
       .min(1)
       .describe(
         'Show title or title fragment. Matched fuzzily against every show title in the database, so minor misspellings still resolve.',
@@ -67,6 +75,11 @@ export const searchShows = tool('tvmaze_search_shows', {
       .describe(
         'Guidance when nothing matched or when the ten-result ceiling was reached. Absent otherwise.',
       ),
+  },
+
+  enrichmentTrailer: {
+    notice: { render: noticeText },
+    effectiveQuery: { render: (value) => `Query: ${inline(value)}` },
   },
 
   async handler(input, ctx) {

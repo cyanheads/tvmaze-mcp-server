@@ -29,6 +29,120 @@ import {
 const getHttp = installTvmazeToolHarness();
 
 describe('tvmaze_get_schedule', () => {
+  it('composes bounded zero-channel hints with partial feed and clamp notices', async () => {
+    const rows = Array.from({ length: 12 }, (_, index) => ({
+      ...rawEpisode({ id: index + 1 }),
+      show: rawShow({
+        network: { id: index + 1, name: `Channel ${String(index).padStart(2, '0')}` },
+      }),
+    }));
+    getHttp().route({
+      match: `${TVMAZE_TEST_BASE_URL}/schedule?country=US&date=2026-09-18`,
+      respond: Response.json(rows),
+    });
+    getHttp().route({
+      match: `${TVMAZE_TEST_BASE_URL}/schedule/web?country=US&date=2026-09-18`,
+      respond: new Response('null', { status: 404 }),
+    });
+    getHttp().route({
+      match: `${TVMAZE_TEST_BASE_URL}/schedule/web?country=&date=2026-09-18`,
+      respond: Response.json([]),
+    });
+    const result = await runToolContract(getSchedule, {
+      date: '2026-09-18',
+      scope: 'all',
+      channel: 'missing',
+      limit: 500,
+    });
+    expect(result.structuredContent).toMatchObject({
+      entries: [],
+      totalCount: 0,
+      shown: 0,
+      cap: 250,
+      applied_feeds: ['linear:US', 'web:global'],
+    });
+    const notice = (result.structuredContent as { notice: string }).notice;
+    expect(notice).toContain('returned 0 entries');
+    expect(notice).toContain('No entries match channel "missing"');
+    expect(notice).toContain('Channel 09');
+    expect(notice).not.toContain('Channel 10');
+    expect(notice).toContain('incomplete');
+    expect(notice).toContain('web:US feed did not respond');
+    expect(getHttp().calls).toHaveLength(3);
+    expect(result.content.map((block) => (block as { text: string }).text).join('\n')).toContain(
+      notice,
+    );
+  });
+  it.each(['linear', 'streaming', 'all'] as const)(
+    'filters %s channels exactly before paging',
+    async (scope) => {
+      const rows = ['ABC', 'ABC News Live', 'abc', undefined].map((name, index) => ({
+        ...rawEpisode({ id: index + 1 }),
+        show: rawShow({ network: name ? { id: 1, name, country: null } : null }),
+      }));
+      getHttp().route({
+        match: `${TVMAZE_TEST_BASE_URL}/schedule?country=US&date=2026-09-18`,
+        respond: () => Response.json(rows),
+      });
+      getHttp().route({
+        match: `${TVMAZE_TEST_BASE_URL}/schedule/web?country=&date=2026-09-18`,
+        respond: () =>
+          Response.json(rows.map(({ show, ...episode }) => ({ ...episode, _embedded: { show } }))),
+      });
+      getHttp().route({
+        match: `${TVMAZE_TEST_BASE_URL}/schedule/web?country=US&date=2026-09-18`,
+        respond: () => Response.json([]),
+      });
+      const input = { scope, date: '2026-09-18', channel: ' ABC ', limit: 1 };
+      const first = await runToolContract(getSchedule, input);
+      expect(first.structuredContent).toMatchObject({
+        entries: [{ id: 1 }],
+        totalCount: 2,
+        has_more: true,
+      });
+      const next = await runToolContract(getSchedule, {
+        ...input,
+        cursor: (first.structuredContent as { next_cursor: string }).next_cursor,
+      });
+      expect(next.structuredContent).toMatchObject({
+        entries: [{ id: 3 }],
+        totalCount: 2,
+        has_more: false,
+      });
+      const past = await runToolContract(getSchedule, {
+        ...input,
+        cursor: encodeCursor({ offset: 10, limit: 1 }),
+      });
+      expect(past.structuredContent).not.toHaveProperty('notice');
+      const miss = await runToolContract(getSchedule, { ...input, channel: 'unknown', limit: 500 });
+      expect(miss.structuredContent).toMatchObject({
+        entries: [],
+        totalCount: 0,
+        shown: 0,
+        cap: 250,
+        notice: expect.stringContaining('ABC News Live'),
+      });
+      const blank = await runToolContract(getSchedule, { ...input, channel: '  ', limit: 10 });
+      expect(blank.structuredContent).toMatchObject({ totalCount: 4 });
+    },
+  );
+  it('clamps an oversized schedule page and reports the actual returned count', async () => {
+    getHttp().route({
+      match: `${TVMAZE_TEST_BASE_URL}/schedule?country=US&date=2026-09-18`,
+      respond: Response.json([{ ...rawEpisode(), show: rawShow() }]),
+    });
+    const result = await runToolContract(getSchedule, { date: '2026-09-18', limit: 500 });
+    expect(result.structuredContent).toMatchObject({
+      shown: 1,
+      cap: 250,
+      totalCount: 1,
+      has_more: false,
+    });
+    expect(result.structuredContent).not.toHaveProperty('truncated');
+    expect(result.content.map((block) => (block as { text: string }).text).join('\n')).toContain(
+      'returned 1 entries',
+    );
+  });
   it('lists the linear feed for an explicit country and date', async () => {
     getHttp().route({
       match: `${TVMAZE_TEST_BASE_URL}/schedule?country=US&date=2026-09-18`,

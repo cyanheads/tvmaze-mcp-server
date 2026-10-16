@@ -14,6 +14,7 @@ import {
   field,
   inline,
   NOT_AVAILABLE,
+  noticeText,
   SEASON_TABLE_HEADER,
   Season,
   ShowSummary,
@@ -63,6 +64,12 @@ export const getShow = tool('tvmaze_get_show', {
 
   output: z.object({
     show: ShowSummary.extend({
+      schedule_timezone: z
+        .string()
+        .optional()
+        .describe(
+          'IANA timezone of the selected channel’s recurring schedule. Absent when the channel does not provide one.',
+        ),
       official_site: z.string().optional().describe('Show page on the network or studio site.'),
       schedule_days: z
         .array(z.string())
@@ -73,7 +80,7 @@ export const getShow = tool('tvmaze_get_show', {
         .string()
         .optional()
         .describe(
-          'Regular slot start time in the channel’s local 24-hour clock, e.g. "22:00". Absent when there is no fixed slot.',
+          'Regular slot start time in the channel’s local 24-hour clock, e.g. "22:00"; schedule_timezone names that clock when known. Absent when there is no fixed slot.',
         ),
     }).describe('Full show profile.'),
     seasons: z
@@ -96,6 +103,8 @@ export const getShow = tool('tvmaze_get_show', {
       .optional()
       .describe('Guidance when a Running show has no scheduled next episode. Absent otherwise.'),
   },
+
+  enrichmentTrailer: { notice: { render: noticeText } },
 
   async handler(input, ctx) {
     const service = getTvmazeService();
@@ -126,6 +135,7 @@ export const getShow = tool('tvmaze_get_show', {
     const lines: string[] = [`# ${inline(result.show.name)}`, ...showSummaryLines(result.show)];
     lines.push(
       `${field('official_site', result.show.official_site)} | ${field('schedule_days', result.show.schedule_days)} | ${field('schedule_time', result.show.schedule_time)}`,
+      field('schedule_timezone', result.show.schedule_timezone),
       field('timezone', result.timezone),
       '',
       '## Seasons',

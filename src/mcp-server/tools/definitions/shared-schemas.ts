@@ -192,7 +192,7 @@ export const Season = z.object({
     .string()
     .optional()
     .describe(
-      'Network or streaming service that carried this season, when it differs from the show.',
+      'Network or streaming service that carried this season, including when it matches the show.',
     ),
 });
 
@@ -237,11 +237,25 @@ export const NOT_AVAILABLE = 'Not available';
 const LINE_BREAKING_CHARACTERS = /[\p{Cc}\p{Zl}\p{Zp}]/gu;
 
 /**
- * Flatten an upstream string onto the single line it is rendered into. Every
+ * Render an upstream string as literal text on one line. Every
  * TVmaze title, name, and label is contributor-authored, so a value is text to
  * display, never structure this renderer agreed to emit.
  */
 export function inline(value: string): string {
+  const text = flatten(value);
+  return text.replace(/[\\`*_[\]<>|&#~]/g, (character, offset: number) => {
+    if (
+      character === '_' &&
+      /[\p{L}\p{N}]/u.test(text[offset - 1] ?? '') &&
+      /[\p{L}\p{N}]/u.test(text[offset + 1] ?? '')
+    )
+      return character;
+    return `\\${character}`;
+  });
+}
+
+/** Collapse block-breaking whitespace without changing deliberate summary markup. */
+function flatten(value: string): string {
   return value.replace(LINE_BREAKING_CHARACTERS, ' ').trim();
 }
 
@@ -257,7 +271,17 @@ function present(value: unknown): string {
 
 /** Render one labelled field, preserving absence rather than inventing a value. */
 export function field(label: string, value: unknown): string {
-  return `**${label}:** ${present(value)}`;
+  const raw =
+    label === 'url' ||
+    label.endsWith('_url') ||
+    label === 'official_site' ||
+    label === 'next_cursor';
+  return `**${label}:** ${raw && typeof value === 'string' ? flatten(value) || NOT_AVAILABLE : present(value)}`;
+}
+
+/** Render a populated optional notice as literal text with the standard quote prefix. */
+export function noticeText(value: string | undefined): string {
+  return value === undefined ? '' : `> ${inline(value)}`;
 }
 
 /** `2018–present` for a running show, `2008–2013` for an ended one. */
@@ -276,7 +300,7 @@ export function yearRange(show: {
  */
 export function summaryLines(summary: string | undefined): string[] {
   if (!summary) return [field('summary', summary)];
-  return ['**summary:**', ...summary.split('\n').map((line) => `> ${inline(line)}`)];
+  return ['**summary:**', ...summary.split('\n').map((line) => `> ${flatten(line)}`)];
 }
 
 /**
@@ -327,19 +351,9 @@ export const SEASON_TABLE_HEADER = [
   '|---|---|---|---|---|---|---|',
 ];
 
-/**
- * {@link present}, escaped for a Markdown table cell. A literal `|` in a
- * contributor-authored value would open a column of its own and shift every
- * later field under the wrong header, so it becomes `\|` — and any backslashes
- * already in front of it are doubled, so they cannot cancel that escape.
- */
-function tableCell(value: unknown): string {
-  return present(value).replace(/(\\*)\|/g, (_match, slashes: string) => `${slashes}${slashes}\\|`);
-}
-
 /** Every {@link Season} field, as one row of the season table. */
 export function seasonRow(season: z.infer<typeof Season>): string {
-  return `| ${tableCell(season.number)} | ${tableCell(season.name)} | ${tableCell(season.episode_order)} | ${tableCell(season.premiere_date)} | ${tableCell(season.end_date)} | ${tableCell(season.channel)} | ${tableCell(season.id)} |`;
+  return `| ${present(season.number)} | ${present(season.name)} | ${present(season.episode_order)} | ${present(season.premiere_date)} | ${present(season.end_date)} | ${present(season.channel)} | ${present(season.id)} |`;
 }
 
 /** Every {@link CastCredit} field. */

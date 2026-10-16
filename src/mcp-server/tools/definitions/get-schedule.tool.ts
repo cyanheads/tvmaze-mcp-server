@@ -9,12 +9,13 @@ import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
 
 import { getTvmazeService, normalizeCountry, todayIn } from '@/services/tvmaze/tvmaze-service.js';
 import type { ScheduleEntry, ScheduleFeed } from '@/services/tvmaze/types.js';
-import { DEFAULT_PAGE_SIZE, enrichPage, MAX_PAGE_SIZE, pageOf } from './paging.js';
+import { DEFAULT_PAGE_SIZE, enrichPage, pageOf } from './paging.js';
 import {
   Episode,
   episodeLines,
   field,
   inline,
+  noticeText,
   ScheduleShow,
   scheduleShowLines,
 } from './shared-schemas.js';
@@ -60,6 +61,13 @@ export const getSchedule = tool('tvmaze_get_schedule', {
   ],
 
   input: z.object({
+    channel: z
+      .string()
+      .trim()
+      .optional()
+      .describe(
+        'Exact channel name, case-insensitive, such as "Netflix". Filters before paging. Blank means all channels.',
+      ),
     date: z
       .string()
       .regex(/^\d{4}-\d{2}-\d{2}$/)
@@ -91,10 +99,9 @@ export const getSchedule = tool('tvmaze_get_schedule', {
       .number()
       .int()
       .min(1)
-      .max(MAX_PAGE_SIZE)
       .default(DEFAULT_PAGE_SIZE)
       .describe(
-        'Maximum entries to return in this call. Applies to every page, including a call that passes cursor. A full day in one country runs to roughly 50 broadcast entries and over 120 global streaming entries.',
+        'Maximum entries to return in this call. Requests above 250 are clamped to 250. Applies to every page, including a call that passes cursor. A full day in one country runs to roughly 50 broadcast entries and over 120 global streaming entries.',
       ),
     cursor: z
       .string()
@@ -134,10 +141,13 @@ export const getSchedule = tool('tvmaze_get_schedule', {
       .describe(
         'Exactly which upstream feeds the results cover, e.g. ["linear:US"], ["web:global"], ["linear:GB","web:GB","web:global"].',
       ),
-    totalCount: z.number().describe('Merged entry count before the page limit was applied.'),
-    truncated: z.boolean().optional().describe('True when the page limit was reached.'),
+    totalCount: z.number().describe('Matching merged entry count before paging.'),
+    truncated: z.boolean().optional().describe('True when more matching entries remain.'),
     shown: z.number().optional().describe('Number of entries returned on this page.'),
-    cap: z.number().optional().describe('The page size applied to this call — its limit.'),
+    cap: z
+      .number()
+      .optional()
+      .describe('Applied page size, at most 250; present when clamped or more rows remain.'),
     notice: z
       .string()
       .optional()
@@ -147,6 +157,7 @@ export const getSchedule = tool('tvmaze_get_schedule', {
   },
 
   enrichmentTrailer: {
+    notice: { render: noticeText },
     applied_feeds: { render: (feeds) => `**Feeds queried:** ${feeds.join(', ')}` },
   },
 
@@ -222,7 +233,12 @@ export const getSchedule = tool('tvmaze_get_schedule', {
     }
     merged.sort((a, b) => (Date.parse(a.airstamp) || 0) - (Date.parse(b.airstamp) || 0));
 
-    const page = pageOf(merged, input.cursor, input.limit, ctx);
+    const channel = input.channel || undefined;
+    const channelKey = channel?.toLowerCase();
+    const filtered = channel
+      ? merged.filter((entry) => entry.show.channel?.toLowerCase() === channelKey)
+      : merged;
+    const page = pageOf(filtered, input.cursor, input.limit, ctx);
     ctx.log.info('Schedule fetched', {
       date,
       feeds: succeeded,
@@ -233,6 +249,14 @@ export const getSchedule = tool('tvmaze_get_schedule', {
     ctx.enrich({ applied_feeds: succeeded });
 
     const fragments: string[] = [];
+    if (channel && merged.length > 0 && filtered.length === 0) {
+      const available = [
+        ...new Set(merged.flatMap((entry) => (entry.show.channel ? [entry.show.channel] : []))),
+      ].sort();
+      fragments.push(
+        `No entries match channel "${channel}". Remove channel to browse all entries. Available channels: ${available.slice(0, 10).join(', ') || 'none named'}.${available.length > 10 ? ' This list is incomplete; only the first 10 names are shown.' : ''}`,
+      );
+    }
     if (merged.length === 0) {
       if (input.scope === 'linear') {
         fragments.push(

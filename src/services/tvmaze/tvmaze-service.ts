@@ -23,10 +23,15 @@ import type {
   CastCredit,
   Episode,
   LookupSource,
+  Person,
+  PersonCredit,
+  PersonCreditKind,
   RawCastCredit,
   RawCrewCredit,
   RawEpisode,
   RawGuestCrewCredit,
+  RawPerson,
+  RawPersonCredit,
   RawSearchHit,
   RawSeason,
   RawShow,
@@ -298,11 +303,17 @@ export function normalizeScheduleShow(raw: RawShow): ScheduleShow {
 
 /** Normalize a show record into the full profile `/shows/{id}` carries. */
 export function normalizeShowProfile(raw: RawShow): ShowProfile {
+  const channel = raw.webChannel?.name
+    ? raw.webChannel
+    : raw.network?.name
+      ? raw.network
+      : undefined;
   return {
     ...normalizeShow(raw),
     ...(raw.officialSite ? { official_site: raw.officialSite } : {}),
     schedule_days: raw.schedule?.days ?? [],
     ...(raw.schedule?.time ? { schedule_time: raw.schedule.time } : {}),
+    ...(channel?.country?.timezone ? { schedule_timezone: channel.country.timezone } : {}),
   };
 }
 
@@ -372,6 +383,55 @@ export function normalizeGuestCrewCredit(raw: RawGuestCrewCredit): CastCredit {
     person_id: raw.person.id,
     ...(raw.guestCrewType ? { credit_type: raw.guestCrewType } : {}),
     ...(raw.person.image?.original ? { person_image_url: raw.person.image.original } : {}),
+  };
+}
+
+/** Keep person identity and the source's optional disambiguators. */
+function normalizePerson(raw: RawPerson): Person {
+  return {
+    id: raw.id,
+    name: raw.name,
+    url: raw.url,
+    ...(raw.country?.name ? { country: raw.country.name } : {}),
+    ...(raw.birthday ? { birthday: raw.birthday } : {}),
+    ...(raw.image?.original ? { image_url: raw.image.original } : {}),
+  };
+}
+
+/** Project embedded credit identities; guest show links never trigger a lookup. */
+function normalizePersonCredit(raw: RawPersonCredit, configuredOrigin: string): PersonCredit {
+  const { show, episode, character } = raw._embedded ?? {};
+  const link = episode?._links?.show;
+  const url = link?.href ? URL.parse(link.href) : null;
+  const match =
+    url &&
+    (url.origin === 'https://api.tvmaze.com' || url.origin === configuredOrigin) &&
+    !url.username &&
+    !url.password &&
+    !url.search &&
+    !url.hash
+      ? /^\/shows\/([1-9]\d*)$/.exec(url.pathname)
+      : null;
+  const linkedId = match ? Number(match[1]) : undefined;
+  return {
+    ...(show
+      ? { show_id: show.id, show_name: show.name, show_url: show.url }
+      : linkedId && Number.isSafeInteger(linkedId)
+        ? {
+            show_id: linkedId,
+            show_url: `https://www.tvmaze.com/shows/${linkedId}`,
+            ...(link?.name ? { show_name: link.name } : {}),
+          }
+        : {}),
+    ...(episode
+      ? { episode_id: episode.id, episode_name: episode.name, episode_url: episode.url }
+      : {}),
+    ...(character
+      ? { character_id: character.id, character_name: character.name, character_url: character.url }
+      : {}),
+    ...(raw.type ? { credit_type: raw.type } : {}),
+    ...(typeof raw.self === 'boolean' ? { as_self: raw.self } : {}),
+    ...(typeof raw.voice === 'boolean' ? { voice_only: raw.voice } : {}),
   };
 }
 
@@ -689,6 +749,51 @@ export class TvmazeService {
   // -------------------------------------------------------------------------
   // Credits
   // -------------------------------------------------------------------------
+
+  /** Fuzzy person candidates; never choose a candidate for the caller. */
+  async searchPeople(
+    query: string,
+    ctx: Context,
+  ): Promise<Array<Person & { match_score: number }>> {
+    const rows = await this.fetchJson<Array<{ score: number; person: RawPerson }>>(
+      `/search/people?q=${encodeURIComponent(query)}`,
+      ctx,
+      { operation: 'tvmaze.searchPeople', unavailableReason: 'person_search_unavailable' },
+    );
+    return (rows ?? []).map((row) => ({ ...normalizePerson(row.person), match_score: row.score }));
+  }
+
+  /** Person profile, or null when the id does not exist. */
+  async getPerson(personId: number, ctx: Context): Promise<Person | null> {
+    const raw = await this.fetchJson<RawPerson>(`/people/${personId}`, ctx, {
+      operation: 'tvmaze.getPerson',
+      notFoundAsNull: true,
+    });
+    return raw ? normalizePerson(raw) : null;
+  }
+
+  /** Only the requested credit route, with all references embedded in one request. */
+  async getPersonCredits(
+    personId: number,
+    kind: PersonCreditKind,
+    ctx: Context,
+  ): Promise<PersonCredit[]> {
+    const route =
+      kind === 'guest' ? 'guestcastcredits' : kind === 'crew' ? 'crewcredits' : 'castcredits';
+    const embed =
+      kind === 'guest'
+        ? 'embed[]=episode&embed[]=character'
+        : kind === 'cast'
+          ? 'embed[]=show&embed[]=character'
+          : 'embed[]=show';
+    const rows = await this.fetchJson<RawPersonCredit[]>(
+      `/people/${personId}/${route}?${embed}`,
+      ctx,
+      { operation: 'tvmaze.getPersonCredits' },
+    );
+    const origin = new URL(this.baseUrl).origin;
+    return (rows ?? []).map((row) => normalizePersonCredit(row, origin));
+  }
 
   /** A show's main cast. `null` when the show does not exist. */
   async getShowCast(showId: number, ctx: Context): Promise<CastCredit[] | null> {

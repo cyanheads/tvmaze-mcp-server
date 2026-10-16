@@ -1,13 +1,13 @@
 <div align="center">
   <h1>@cyanheads/tvmaze-mcp-server</h1>
-  <p><b>Search TVmaze shows, next episodes in your timezone, episode guides, daily TV schedules, and cast via MCP. STDIO or Streamable HTTP.</b>
-  <div>7 Tools</div>
+  <p><b>Search TVmaze shows and people, next episodes in your timezone, episode guides, daily schedules, and credits via MCP. STDIO or Streamable HTTP.</b>
+  <div>8 Tools</div>
   </p>
 </div>
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/Version-0.2.1-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/tvmaze-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-^2.2.0-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/tvmaze-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/tvmaze-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-^7.0.2-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.4.2-blueviolet.svg?style=flat-square)](https://bun.sh/)
+[![Version](https://img.shields.io/badge/Version-0.2.1-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/tvmaze-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-^2.3.1-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/tvmaze-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/tvmaze-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-^7.0.2-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.4.3-blueviolet.svg?style=flat-square)](https://bun.sh/)
 
 </div>
 
@@ -42,12 +42,14 @@ Television data from TVmaze — a community-maintained database of series, episo
 | `tvmaze_get_episodes` | Episode guide for one season, one air date, or the whole run, with air times, runtimes, and synopses |
 | `tvmaze_get_schedule` | Episodes airing on a date — broadcast and cable networks in one country, streaming services, or both |
 | `tvmaze_get_cast` | A show's credited cast and the characters they play, optionally crew; or one episode's guest cast, optionally with its director and writers |
+| `tvmaze_get_person` | Search person names for candidates, or page one person's cast, guest, or crew credits |
 
 ## Capability reference
 
 ### `tvmaze_search_shows` <sub>tool</sub>
 
 - Fuzzy match on `query` against every show title, so minor misspellings still resolve
+- Required titles are trimmed; whitespace-only titles are rejected before an upstream request
 - Hard-capped at 10 rows by the source with no pagination; enrichment echoes the query and reports `shown` / `cap`, and the notice routes a saturated or empty result to a narrower title or to `tvmaze_lookup_show`
 - Rows carry the shared show summary plus `match_score`, which is comparable only within one result set
 
@@ -56,7 +58,7 @@ Television data from TVmaze — a community-maintained database of series, episo
 ### `tvmaze_get_show` <sub>tool</sub>
 
 - `show_id` from `tvmaze_search_shows`, `tvmaze_lookup_show`, or a schedule row; optional IANA `timezone` for the rendered episode times
-- Returns the full profile — `schedule_days` / `schedule_time`, `official_site`, `externals` — with every season and the `next_episode` / `previous_episode` the source has
+- Returns the full profile — `schedule_days` / `schedule_time`, optional `schedule_timezone`, `official_site`, `externals` — with every season and the `next_episode` / `previous_episode` the source has. The schedule timezone belongs to the selected channel (named web channel before network); it stays absent when unknown
 - A `Running` show with nothing announced comes back with a notice pointing at `previous_episode` rather than a silently empty field
 - An unknown `show_id` fails as a typed `show_not_found`
 
@@ -65,6 +67,7 @@ Television data from TVmaze — a community-maintained database of series, episo
 ### `tvmaze_lookup_show` <sub>tool</sub>
 
 - One `source` of three — `imdb` (a `tt` id), `thetvdb`, or `tvrage` (defunct, present only in older records) — paired with `external_id`
+- IMDb ids tolerate surrounding whitespace, uppercase `TT`, bare digits, and HTTP(S) `imdb.com` / `www.imdb.com` title URLs with an exact `/title/tt<digits>` path and optional trailing slash, query, or fragment. Credentials and extra path segments are rejected; at least seven digits are required and leading zeroes are preserved. The advertised schema remains the canonical lowercase `tt` id
 - A show absent from TVmaze is a result, not an error: `found: false` plus `guidance` routing to `tvmaze_search_shows`
 - Echoes `source` and `external_id`; a hit returns the same show summary the search tool does
 
@@ -73,6 +76,7 @@ Television data from TVmaze — a community-maintained database of series, episo
 ### `tvmaze_get_next_episode` <sub>tool</sub>
 
 - `by: "id"` takes a TVmaze id; `by: "title"` resolves a title through a stricter single-match search than `tvmaze_search_shows` uses
+- Title input is trimmed and cannot be blank
 - Air times render in the requested IANA `timezone`; `time_known: false` means the source announced no clock time, so only the date is reliable
 - Typed `miss_reason` — `show_not_found` on the title arm, `no_scheduled_episode` for a series between seasons, the latter still carrying `previous_episode`; the text output's headline names the same miss
 - A `show_id` that resolves to nothing throws `show_not_found_by_id`; an unresolvable title is a miss
@@ -84,7 +88,7 @@ Television data from TVmaze — a community-maintained database of series, episo
 - `season` lists one season (the cheaper path); `air_date` (`YYYY-MM-DD`) lists the episodes dated to one day, the direct way to find one night of a daily show; omit both to walk the whole run. `season` and `air_date` cannot be combined
 - `air_date` matches the source's `airdate`, the broadcaster's programming day, which can differ by a day from an episode's `local_date` on a late-night slot. A day with nothing on it returns an empty list with a notice; a date that is not on the calendar fails as `invalid_date`
 - `include_specials` defaults to false; every listing, whether season, air date, or whole run, reports how many specials it filtered out
-- `limit` 1–250 (default 50) sets the page size on every call, including one that passes `cursor`; `next_cursor` / `has_more` continue the listing, and enrichment carries the pre-page `totalCount` plus `truncated` / `shown` / `cap` on a partial page
+- Positive integer `limit` (default 50) sets each page size, clamped to 250 with a notice naming the request, cap, and actual rows returned. `next_cursor` / `has_more` continue the listing; `totalCount` counts before paging, `shown` / `cap` appear when clamped or more rows remain, and `truncated` appears only when more rows remain
 - A `season_not_found` failure names the seasons that do exist
 
 ---
@@ -96,17 +100,27 @@ Television data from TVmaze — a community-maintained database of series, episo
 - Entries carry `feed` (`linear` / `streaming`) alongside the episode; a merged query dedupes and sorts by `airstamp`
 - Each entry's `show` is a compact reference — `id`, `name`, `url`, `type`, `genres`, and the channel — since a day's listing repeats a show on every episode; `tvmaze_get_show` returns the full profile
 - `applied_feeds` names exactly which upstream feeds answered, e.g. `["linear:GB","web:GB","web:global"]`; one feed failing degrades to a notice instead of failing the call
-- `limit` 1–250 (default 50) sets the page size on every call, including one that passes `cursor` — a country day runs to roughly 50 broadcast entries, the global streaming feed to over 120
+- Optional `channel` matches a trimmed, case-insensitive exact channel name before paging; blanks are unset. No matches yield bounded available-channel guidance; a past-end page keeps its filtered total
+- Positive integer `limit` (default 50, clamped to 250 with actual returned count) sets each page size, including continuation calls
 
 ---
 
 ### `tvmaze_get_cast` <sub>tool</sub>
 
 - `scope: "show"` returns the main cast with character names, plus the show's crew when `include_crew` is set; `scope: "episode"` returns that episode's guest cast, plus its guest crew (director, writers) when `include_crew` is set, still in a single upstream request
-- Paged on both scopes: `limit` 1–250 (default 50) and `cursor`, with cast rows first and crew rows after them in one sequence, split back into `cast` and `crew` on each page; `cast_total` / `crew_total` and the enrichment `totalCount` count every page
+- Paged on both scopes: positive integer `limit` (default 50, clamped to 250 with actual returned count) and `cursor`, with cast rows first and crew rows after them in one sequence, split back into `cast` and `crew` on each page; `cast_total` / `crew_total` and the enrichment `totalCount` count every page
+- Optional `name` matches a trimmed, case-insensitive substring in performer, character, or crew role before paging; blanks are unset. Crew is searched only with `include_crew: true`; totals count filtered credits
 - Cast credits carry `as_self` and `voice_only`; crew credits carry `credit_type` and no character
 - TVmaze records no recurring-versus-guest distinction on a show's cast list, so absence from it is not evidence a performer never appeared — check an episode's guest cast
 - Missing credits arrive as a notice, not an error; community coverage thins on smaller titles
+
+### `tvmaze_get_person` <sub>tool</sub>
+
+- Supply exactly one of `query` (trimmed name search; blank is unset) or positive `person_id` (from cast credits or a candidate)
+- Search returns compact candidates and real source scores, never an automatic selection. Choose an id even for one match; ten candidates disclose a possible source cap and suggest narrowing, with no search cursor
+- An id returns the person and one `credit_kind`: `cast` (default), `guest`, or `crew`. Selectors, `limit`, and `cursor` apply only to the id path
+- Credits keep source order and compact show, episode, and character identities, URLs, roles, and self/voice flags when available. Guest `episode_id` chains to `tvmaze_get_cast`; `show_id` chains to `tvmaze_get_show` or `tvmaze_get_episodes`. Missing embeds remain absent; credits are never hydrated individually
+- Paging defaults to 50 and clamps above 250 with honest counts; the current call's limit applies on continuation. No candidates or credits is an empty success; a missing id is `person_not_found`
 
 ## Features
 
@@ -125,6 +139,7 @@ Agent-friendly output:
 - Typed error contracts on every tool — a `reason` plus a recovery hint that reaches both `structuredContent` and the text surface
 - Resolution misses are results, not failures: `tvmaze_lookup_show` and the title arm of `tvmaze_get_next_episode` return `found: false` with `guidance` for the next call
 - Enrichment states what a call actually covered — the echoed query, `applied_feeds`, pre-page totals, and truncation against the source's own caps
+- Names and labels render as literal Markdown text; structured strings and URLs retain their original values, while synopsis emphasis is preserved
 
 ## Data and licensing
 
@@ -301,7 +316,7 @@ The Dockerfile defaults to HTTP transport, stateless session mode, and logs to `
 
 | Directory | Purpose |
 |:----------|:--------|
-| `src/index.ts` | `createApp()` entry point — registers the seven tools, server instructions, and the service lifecycle. |
+| `src/index.ts` | `createApp()` entry point — registers the eight tools, server instructions, and the service lifecycle. |
 | `src/config` | Server-specific environment variable parsing and validation with Zod. |
 | `src/mcp-server/tools` | Tool definitions (`*.tool.ts`) and the output schemas they share. |
 | `src/services/tvmaze` | TVmaze REST client — pacing, retries, response cache, and normalization into the domain types. |

@@ -66,6 +66,7 @@ export const getNextEpisode = tool('tvmaze_get_next_episode', {
         .describe('Identify the show by title. Resolved to a single best match.'),
       title: z
         .string()
+        .trim()
         .min(1)
         .describe(
           'Show title. Matched to one best result; when several shows share a title, resolve the id with tvmaze_search_shows first and call again with by "id".',

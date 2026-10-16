@@ -45,6 +45,8 @@ export interface RawExternals {
 
 /** A person credited on a show or episode. */
 export interface RawPerson {
+  birthday?: string | null;
+  country?: RawCountry | null;
   id: number;
   image?: RawImage | null;
   name: string;
@@ -134,6 +136,7 @@ export interface RawEpisode {
     guestcrew?: RawGuestCrewCredit[];
     show?: RawShow;
   } | null;
+  _links?: { show?: { href?: string; name?: string } };
   airdate?: string | null;
   airstamp: string;
   airtime?: string | null;
@@ -192,6 +195,7 @@ export interface ShowProfile extends ShowSummary {
   official_site?: string;
   schedule_days: string[];
   schedule_time?: string;
+  schedule_timezone?: string;
 }
 
 /** An episode with its air time resolved into the requested timezone. */
@@ -268,3 +272,40 @@ export type ScheduleFeed =
 
 /** The external catalogs `/lookup/shows` accepts. */
 export type LookupSource = 'imdb' | 'thetvdb' | 'tvrage';
+
+/** Compact person identity and optional disambiguators. */
+export interface Person {
+  birthday?: string;
+  country?: string;
+  id: number;
+  image_url?: string;
+  name: string;
+  url: string;
+}
+
+/** A person's selected credit category. */
+export type PersonCreditKind = 'cast' | 'guest' | 'crew';
+
+/** Person credit embeds vary by route; unprovided embeds remain absent. */
+export interface RawPersonCredit {
+  _embedded?: { show?: RawShow; episode?: RawEpisode; character?: RawCharacter } | null;
+  self?: boolean | null;
+  type?: string | null;
+  voice?: boolean | null;
+}
+
+/** Compact credit references, without repeated show/episode profiles. */
+export interface PersonCredit {
+  as_self?: boolean;
+  character_id?: number;
+  character_name?: string;
+  character_url?: string;
+  credit_type?: string;
+  episode_id?: number;
+  episode_name?: string;
+  episode_url?: string;
+  show_id?: number;
+  show_name?: string;
+  show_url?: string;
+  voice_only?: boolean;
+}

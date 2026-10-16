@@ -5,10 +5,13 @@
  * @module tests/mcp-server/tools/definitions/lookup-show.tool.test
  */
 
+import { z } from '@cyanheads/mcp-ts-core';
 import { runToolContract } from '@cyanheads/mcp-ts-core/testing';
 import { describe, expect, it, vi } from 'vitest';
-
+import { getNextEpisode } from '@/mcp-server/tools/definitions/get-next-episode.tool.js';
 import { lookupShow } from '@/mcp-server/tools/definitions/lookup-show.tool.js';
+import { searchShows } from '@/mcp-server/tools/definitions/search-shows.tool.js';
+import { inline } from '@/mcp-server/tools/definitions/shared-schemas.js';
 import { rawShow } from '../../../fixtures/tvmaze-fixtures.js';
 import { errorEnvelope } from '../../../helpers/error-envelope.js';
 import {
@@ -19,6 +22,82 @@ import {
 const getHttp = installTvmazeToolHarness();
 
 describe('tvmaze_lookup_show', () => {
+  it('keeps the advertised IMDb schema canonical and preserves leading zeros', async () => {
+    const schema = z.toJSONSchema(lookupShow.input, { io: 'input' });
+    expect(schema).toMatchObject({
+      oneOf: [{ properties: { external_id: { pattern: '^tt\\d{7,}$' } } }, {}, {}],
+    });
+    getHttp().route({
+      match: `${TVMAZE_TEST_BASE_URL}/lookup/shows?imdb=tt0000001`,
+      respond: Response.json(rawShow()),
+    });
+    const result = await runToolContract(lookupShow, { source: 'imdb', external_id: '0000001' });
+    expect(result.structuredContent).toMatchObject({ external_id: 'tt0000001' });
+  });
+  it('bounds new normalization and literal rendering across a 64-fold input span', () => {
+    const measure = (length: number) => {
+      const digits = '0'.repeat(length);
+      const text = '*'.repeat(length);
+      const begin = process.threadCpuUsage();
+      for (let repeat = 0; repeat < 20; repeat++) {
+        lookupShow.input.safeParse({ source: 'imdb', external_id: digits });
+        lookupShow.input.safeParse({
+          source: 'imdb',
+          external_id: `https://imdb.com/title/tt${digits}/bad`,
+        });
+        inline(text);
+      }
+      const cpu = process.threadCpuUsage(begin);
+      return cpu.user + cpu.system;
+    };
+    measure(5_000);
+    const small = measure(5_000);
+    measure(20_000);
+    measure(80_000);
+    const large = measure(320_000);
+    expect(large / Math.max(small, 1)).toBeLessThan(256);
+    expect(large).toBeLessThan(2_000_000);
+  });
+  it('rejects whitespace-only titles before fetching', async () => {
+    getHttp().route({
+      match: `${TVMAZE_TEST_BASE_URL}/search/shows?q=%20%09%20`,
+      respond: Response.json([]),
+    });
+    getHttp().route({
+      match: `${TVMAZE_TEST_BASE_URL}/singlesearch/shows?q=%20%09%20&embed[]=nextepisode&embed[]=previousepisode`,
+      respond: new Response('null', { status: 404 }),
+    });
+    const search = await runToolContract(searchShows, { query: ' \t ' });
+    const next = await runToolContract(getNextEpisode, { by: 'title', title: ' \t ' });
+    expect(search.isError).toBe(true);
+    expect(next.isError).toBe(true);
+    expect(getHttp().calls).toHaveLength(0);
+  });
+  it.each([
+    'TT0903747',
+    '0903747',
+    ' tt0903747 ',
+    'https://www.imdb.com/title/tt0903747/?ref=x#top',
+  ])('normalizes IMDb input %s', async (external_id) => {
+    getHttp().route({
+      match: `${TVMAZE_TEST_BASE_URL}/lookup/shows?imdb=tt0903747`,
+      respond: Response.json(rawShow()),
+    });
+    const result = await runToolContract(lookupShow, { source: 'imdb', external_id });
+    expect(result.structuredContent).toMatchObject({ found: true, external_id: 'tt0903747' });
+    expect((result.content[0] as { text: string }).text).toContain('**external_id:** tt0903747');
+  });
+  it.each([
+    'https://imdb.com.evil.test/title/tt0903747',
+    'https://imdb.com@evil.test/title/tt0903747',
+    'https://user@imdb.com/title/tt0903747',
+    'https://imdb.com/title/tt0903747/extra',
+    'tt123456',
+  ])('rejects invalid IMDb input %s without fetching', async (external_id) => {
+    const result = await runToolContract(lookupShow, { source: 'imdb', external_id });
+    expect(result.isError).toBe(true);
+    expect(getHttp().calls).toHaveLength(0);
+  });
   it('resolves an IMDb id to a show (hit)', async () => {
     getHttp().route({
       match: `${TVMAZE_TEST_BASE_URL}/lookup/shows?imdb=tt0903747`,

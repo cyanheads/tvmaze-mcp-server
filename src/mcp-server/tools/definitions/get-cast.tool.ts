@@ -10,19 +10,25 @@ import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
 
 import { getTvmazeService } from '@/services/tvmaze/tvmaze-service.js';
 import type { CastCredit as CastCreditShape } from '@/services/tvmaze/types.js';
-import { DEFAULT_PAGE_SIZE, enrichPage, MAX_PAGE_SIZE, pageOf } from './paging.js';
-import { CastCredit, castCreditLines, field, NOT_AVAILABLE } from './shared-schemas.js';
+import { DEFAULT_PAGE_SIZE, enrichPage, pageOf } from './paging.js';
+import { CastCredit, castCreditLines, field, NOT_AVAILABLE, noticeText } from './shared-schemas.js';
 
 /** Paging inputs shared by both scopes. */
 const pagingInput = {
+  name: z
+    .string()
+    .trim()
+    .optional()
+    .describe(
+      'Case-insensitive substring in performer, character, or crew role. Blank means no filter; crew is searched only with include_crew.',
+    ),
   limit: z
     .number()
     .int()
     .min(1)
-    .max(MAX_PAGE_SIZE)
     .default(DEFAULT_PAGE_SIZE)
     .describe(
-      'Maximum credits to return in this call, cast and crew together. Applies to every page, including a call that passes cursor. A long-running series carries over a thousand cast credits.',
+      'Maximum credits to return in this call, cast and crew together. Requests above 250 are clamped to 250. Applies to every page, including a call that passes cursor. A long-running series carries over a thousand cast credits.',
     ),
   cursor: z
     .string()
@@ -114,11 +120,11 @@ export const getCast = tool('tvmaze_get_cast', {
       .describe(
         'Crew credits on this page — for scope "show", the show’s crew; for scope "episode", that episode’s guest crew. Present, possibly empty, whenever include_crew was set; crew rows follow every cast row, so a page that ends inside the cast carries none.',
       ),
-    cast_total: z.number().describe('Cast credits across every page.'),
+    cast_total: z.number().describe('Matching cast credits across every page.'),
     crew_total: z
       .number()
       .optional()
-      .describe('Crew credits across every page. Present when include_crew was set.'),
+      .describe('Matching crew credits across every page. Present when include_crew was set.'),
     scope: z.enum(['show', 'episode']).describe('Which credit list was returned.'),
     subject_id: z
       .number()
@@ -131,10 +137,13 @@ export const getCast = tool('tvmaze_get_cast', {
   }),
 
   enrichment: {
-    totalCount: z.number().describe('Credits across every page, cast plus crew.'),
-    truncated: z.boolean().optional().describe('True when the page limit was reached.'),
+    totalCount: z.number().describe('Matching credits across every page, cast plus crew.'),
+    truncated: z.boolean().optional().describe('True when more matching credits remain.'),
     shown: z.number().optional().describe('Number of credits returned on this page.'),
-    cap: z.number().optional().describe('The page size applied to this call — its limit.'),
+    cap: z
+      .number()
+      .optional()
+      .describe('Applied page size, at most 250; present when clamped or more rows remain.'),
     notice: z
       .string()
       .optional()
@@ -142,6 +151,8 @@ export const getCast = tool('tvmaze_get_cast', {
         'Guidance when the page was truncated, or when no cast is recorded — every one that applies, joined. Absent otherwise.',
       ),
   },
+
+  enrichmentTrailer: { notice: { render: noticeText } },
 
   async handler(input, ctx) {
     const service = getTvmazeService();
@@ -164,7 +175,7 @@ export const getCast = tool('tvmaze_get_cast', {
       cast = showCast;
       crew = input.include_crew ? (showCrew ?? []) : undefined;
       subjectId = input.show_id;
-      if (cast.length === 0) {
+      if (cast.length === 0 && !input.name) {
         fragments.push(
           'No cast is recorded for this show. TVmaze is community-maintained and credits are often missing on smaller titles; call tvmaze_get_cast with scope "episode" on a specific episode for its guest cast.',
         );
@@ -182,9 +193,24 @@ export const getCast = tool('tvmaze_get_cast', {
       cast = Array.isArray(credits) ? credits : credits.cast;
       crew = Array.isArray(credits) ? undefined : credits.crew;
       subjectId = input.episode_id;
-      if (cast.length === 0) {
+      if (cast.length === 0 && !input.name) {
         fragments.push(
           'No guest cast is recorded for this episode. Call tvmaze_get_cast with scope "show" for the main cast.',
+        );
+      }
+    }
+
+    if (input.name) {
+      const needle = input.name.toLowerCase();
+      const matches = (credit: CastCreditShape) =>
+        [credit.person_name, credit.character_name, credit.credit_type].some((value) =>
+          value?.toLowerCase().includes(needle),
+        );
+      cast = cast.filter(matches);
+      crew = crew?.filter(matches);
+      if (cast.length + (crew?.length ?? 0) === 0) {
+        fragments.push(
+          `No credits match name "${input.name}". Remove name to browse all credits.${input.include_crew ? '' : ' Set include_crew: true to search crew roles too.'}`,
         );
       }
     }

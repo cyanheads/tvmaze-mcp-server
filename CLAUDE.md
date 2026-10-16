@@ -2,10 +2,10 @@
 
 **Server:** tvmaze-mcp-server
 **Version:** 0.2.1
-**Framework:** [@cyanheads/mcp-ts-core](https://www.npmjs.com/package/@cyanheads/mcp-ts-core) `^0.13.14`
+**Framework:** [@cyanheads/mcp-ts-core](https://www.npmjs.com/package/@cyanheads/mcp-ts-core) `^0.13.15`
 **Engines:** Bun ≥1.4.0, Node ≥24.0.0
-**MCP SDK:** `@modelcontextprotocol/server` ^2.2.0
-**Zod:** ^4.6.5
+**MCP SDK:** `@modelcontextprotocol/server` ^2.3.1
+**Zod:** ^4.6.7
 
 > **Read the framework docs first:** `node_modules/@cyanheads/mcp-ts-core/CLAUDE.md` contains the full API reference — builders, Context, error codes, exports, patterns. This file covers server-specific conventions only.
 
@@ -53,7 +53,7 @@ import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
 
 import { getTvmazeService } from '@/services/tvmaze/tvmaze-service.js';
-import { field, ShowSummary, showSummaryLines, yearRange } from './shared-schemas.js';
+import { field, inline, ShowSummary, showSummaryLines, yearRange } from './shared-schemas.js';
 
 /** The source's fixed ceiling on `/search/shows`. There is no paging past it. */
 const SEARCH_RESULT_CAP = 10;
@@ -78,6 +78,7 @@ export const searchShows = tool('tvmaze_search_shows', {
   input: z.object({
     query: z
       .string()
+      .trim()
       .min(1)
       .describe(
         'Show title or title fragment. Matched fuzzily against every show title in the database, so minor misspellings still resolve.',
@@ -131,7 +132,7 @@ export const searchShows = tool('tvmaze_search_shows', {
     for (const show of result.shows) {
       lines.push(
         '',
-        `### ${show.name} (${yearRange(show)})`,
+        `### ${inline(`${show.name} (${yearRange(show)})`)}`,
         field('match_score', show.match_score),
         ...showSummaryLines(show),
       );
@@ -151,7 +152,7 @@ Conventions this surface holds to, and that a new tool inherits:
 
 ### Resource / Prompt
 
-This server ships neither — everything is reachable through the seven tools, a `tvmaze://shows/{id}` resource would only mirror `tvmaze_get_show` while demanding the one thing a caller starting from a title lacks, and the domain has no recurring interaction worth templating (`docs/design.md` § Design Decisions). If that changes, the `add-resource` and `add-prompt` skills carry the current patterns — don't hand-write one from memory.
+This server ships neither — everything is reachable through the eight tools, a `tvmaze://shows/{id}` resource would only mirror `tvmaze_get_show` while demanding the one thing a caller starting from a title lacks, and the domain has no recurring interaction worth templating (`docs/design.md` § Design Decisions). If that changes, the `add-resource` and `add-prompt` skills carry the current patterns — don't hand-write one from memory.
 
 ### Server config
 
@@ -212,7 +213,7 @@ For env booleans use `z.stringbool()`, never `z.coerce.boolean()` — `Boolean("
 await createApp({
   name: 'tvmaze-mcp-server',
   title: 'tvmaze-mcp-server',
-  tools: [searchShows, getShow, lookupShow, getNextEpisode, getEpisodes, getSchedule, getCast],
+  tools: [searchShows, getShow, lookupShow, getNextEpisode, getEpisodes, getSchedule, getCast, getPerson],
   instructions: INSTRUCTIONS, // session-level context, sent on every initialize
 });
 ```
@@ -314,7 +315,7 @@ See framework CLAUDE.md and the `api-errors` skill for the full auto-classificat
 
 ```text
 src/
-  index.ts                              # createApp() entry point — seven tools, instructions, service lifecycle
+  index.ts                              # createApp() entry point — eight tools, instructions, service lifecycle
   config/
     server-config.ts                    # TVMAZE_* env vars (Zod schema)
   services/

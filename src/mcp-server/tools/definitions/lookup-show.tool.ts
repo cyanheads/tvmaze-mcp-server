@@ -10,6 +10,25 @@ import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
 import { getTvmazeService } from '@/services/tvmaze/tvmaze-service.js';
 import { field, inline, ShowSummary, showSummaryLines } from './shared-schemas.js';
 
+/** Normalize unambiguous IMDb spellings while preserving the digit string. */
+function normalizeImdb(value: unknown): unknown {
+  if (typeof value !== 'string') return value;
+  const trimmed = value.trim();
+  if (/^\d+$/.test(trimmed)) return `tt${trimmed}`;
+  if (/^tt\d+$/i.test(trimmed)) return trimmed.toLowerCase();
+  const url = URL.parse(trimmed);
+  if (
+    !url ||
+    !['http:', 'https:'].includes(url.protocol) ||
+    url.username ||
+    url.password ||
+    !['imdb.com', 'www.imdb.com'].includes(url.hostname)
+  )
+    return trimmed;
+  const match = /^\/title\/([tT][tT]\d+)\/?$/.exec(url.pathname);
+  return match?.[1]?.toLowerCase() ?? trimmed;
+}
+
 export const lookupShow = tool('tvmaze_lookup_show', {
   description:
     'Resolve a television show from its id in another catalog — IMDb, TheTVDB, or TVRage — and return the matching TVmaze profile. Use this to cross a show id from another source into TVmaze. A show absent from TVmaze is reported as a miss with guidance, not an error.',
@@ -31,8 +50,13 @@ export const lookupShow = tool('tvmaze_lookup_show', {
     z.object({
       source: z.literal('imdb').describe('Look up by IMDb title id.'),
       external_id: z
-        .string()
-        .regex(/^tt\d{7,}$/)
+        .preprocess(
+          normalizeImdb,
+          z
+            .string()
+            .regex(/^tt\d{7,}$/)
+            .describe('IMDb title id including the "tt" prefix, e.g. "tt0903747".'),
+        )
         .describe('IMDb title id including the "tt" prefix, e.g. "tt0903747".'),
     }),
     z.object({
@@ -57,7 +81,11 @@ export const lookupShow = tool('tvmaze_lookup_show', {
       .optional()
       .describe('What to do next when the lookup missed. Absent on a hit.'),
     source: z.enum(['imdb', 'thetvdb', 'tvrage']).describe('Catalog the lookup was made against.'),
-    external_id: z.string().describe('Id that was looked up, as submitted.'),
+    external_id: z
+      .string()
+      .describe(
+        'Id looked up; IMDb ids use the canonical lowercase tt prefix and original digits.',
+      ),
   }),
 
   async handler(input, ctx) {
