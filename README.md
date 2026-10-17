@@ -29,7 +29,7 @@
 
 ## Overview
 
-Television data from TVmaze — a community-maintained database of series, episodes, air times, and credits, served by a keyless public API. Find a show by title or by its IMDb, TheTVDB, or TVRage id, then read its profile, season episode guides, and cast, or ask when the next episode airs in a viewer's timezone. A whole date works as the starting point too: what a country's networks broadcast that day, what the global streaming services released, or both merged. Runs as a stdio process, a local Streamable HTTP server, or the public hosted endpoint above.
+TV data from TVmaze: shows, episode guides, cast, and air times. Find a show by title or IMDb/TheTVDB id, see when the next episode airs in your timezone, or check what aired and streamed on any date. No API key required.
 
 ### Tools
 
@@ -48,79 +48,63 @@ Television data from TVmaze — a community-maintained database of series, episo
 
 ### `tvmaze_search_shows` <sub>tool</sub>
 
-- Fuzzy match on `query` against every show title, so minor misspellings still resolve
-- Required titles are trimmed; whitespace-only titles are rejected before an upstream request
-- Hard-capped at 10 rows by the source with no pagination; enrichment echoes the query and reports `shown` / `cap`, and the notice routes a saturated or empty result to a narrower title or to `tvmaze_lookup_show`
-- Rows carry the shared show summary plus `match_score`, which is comparable only within one result set
+- Fuzzy-matches `query` against every show title, so minor misspellings still resolve; blank titles are rejected
+- Returns at most 10 shows with no pagination; output reports `shown` / `cap` and points a full or empty result to a narrower title or `tvmaze_lookup_show`
+- Rows carry the shared show summary plus `match_score`, comparable only within one result set
 
 ---
 
 ### `tvmaze_get_show` <sub>tool</sub>
 
-- `show_id` from `tvmaze_search_shows`, `tvmaze_lookup_show`, or a schedule row; optional IANA `timezone` for the rendered episode times
-- Returns the full profile — `schedule_days` / `schedule_time`, optional `schedule_timezone`, `official_site`, `externals` — with every season and the `next_episode` / `previous_episode` the source has. The schedule timezone belongs to the selected channel (named web channel before network); it stays absent when unknown
-- A `Running` show with nothing announced comes back with a notice pointing at `previous_episode` rather than a silently empty field
-- An unknown `show_id` fails as a typed `show_not_found`
+- `show_id` from `tvmaze_search_shows`, `tvmaze_lookup_show`, or a schedule row; optional IANA `timezone` for episode times
+- Returns the full profile (`schedule_days` / `schedule_time`, optional `schedule_timezone`, `official_site`, `externals`) with every season plus `next_episode` / `previous_episode`. A `Running` show with nothing announced comes back with a notice pointing at `previous_episode`
+- An unknown `show_id` fails as `show_not_found`
 
 ---
 
 ### `tvmaze_lookup_show` <sub>tool</sub>
 
-- One `source` of three — `imdb` (a `tt` id), `thetvdb`, or `tvrage` (defunct, present only in older records) — paired with `external_id`
-- IMDb ids tolerate surrounding whitespace, uppercase `TT`, bare digits, and HTTP(S) `imdb.com` / `www.imdb.com` title URLs with an exact `/title/tt<digits>` path and optional trailing slash, query, or fragment. Credentials and extra path segments are rejected; at least seven digits are required and leading zeroes are preserved. The advertised schema remains the canonical lowercase `tt` id
-- A show absent from TVmaze is a result, not an error: `found: false` plus `guidance` routing to `tvmaze_search_shows`
-- Echoes `source` and `external_id`; a hit returns the same show summary the search tool does
+- `source` is `imdb` (a `tt` id), `thetvdb`, or `tvrage` (defunct, present only in older records), paired with `external_id`
+- IMDb ids also accept bare digits, uppercase `TT`, and `imdb.com` title URLs
+- A show absent from TVmaze is a result, not an error: `found: false` plus `guidance` routing to `tvmaze_search_shows`. A hit echoes `source` and `external_id` and returns the same show summary as search
 
 ---
 
 ### `tvmaze_get_next_episode` <sub>tool</sub>
 
-- `by: "id"` takes a TVmaze id; `by: "title"` resolves a title through a stricter single-match search than `tvmaze_search_shows` uses
-- Title input is trimmed and cannot be blank
-- Air times render in the requested IANA `timezone`; `time_known: false` means the source announced no clock time, so only the date is reliable
-- Typed `miss_reason` — `show_not_found` on the title arm, `no_scheduled_episode` for a series between seasons, the latter still carrying `previous_episode`; the text output's headline names the same miss
-- A `show_id` that resolves to nothing throws `show_not_found_by_id`; an unresolvable title is a miss
+- `by: "id"` takes a TVmaze id; `by: "title"` resolves a non-blank title through a stricter single-match search than `tvmaze_search_shows`
+- Air times render in the requested IANA `timezone`; `time_known: false` means no clock time was announced, so only the date is reliable
+- Misses carry a typed `miss_reason`: `show_not_found` (title) or `no_scheduled_episode` (between seasons, with `previous_episode`). A `show_id` that resolves to nothing throws `show_not_found_by_id`
 
 ---
 
 ### `tvmaze_get_episodes` <sub>tool</sub>
 
-- `season` lists one season (the cheaper path); `air_date` (`YYYY-MM-DD`) lists the episodes dated to one day, the direct way to find one night of a daily show; omit both to walk the whole run. `season` and `air_date` cannot be combined
-- `air_date` matches the source's `airdate`, the broadcaster's programming day, which can differ by a day from an episode's `local_date` on a late-night slot. A day with nothing on it returns an empty list with a notice; a date that is not on the calendar fails as `invalid_date`
-- `include_specials` defaults to false; every listing, whether season, air date, or whole run, reports how many specials it filtered out
-- Positive integer `limit` (default 50) sets each page size, clamped to 250 with a notice naming the request, cap, and actual rows returned. `next_cursor` / `has_more` continue the listing; `totalCount` counts before paging, `shown` / `cap` appear when clamped or more rows remain, and `truncated` appears only when more rows remain
-- A `season_not_found` failure names the seasons that do exist
+- `season` lists one season; `air_date` (`YYYY-MM-DD`) lists one day's episodes; omit both for the whole run. They cannot be combined. An empty day returns an empty list with a notice, an impossible date fails as `invalid_date`, and `season_not_found` names the seasons that exist
+- `air_date` matches the source's `airdate`, which can differ by a day from an episode's `local_date` on late-night slots
+- `include_specials` defaults to false, and each listing reports how many specials it filtered out. `limit` (default 50, max 250) sets page size; `next_cursor` / `has_more` continue the listing and `totalCount` counts before paging
 
 ---
 
 ### `tvmaze_get_schedule` <sub>tool</sub>
 
-- `scope` picks the feed: `linear` is one country's broadcast and cable networks plus its own streaming services, `streaming` is global services when `country` is omitted and that country's local ones when it is given, `all` merges both across three upstream requests
-- `date` defaults to today in the requested `timezone`; `country` is ISO 3166-1 alpha-2 (the United Kingdom is `GB`) and falls back to the configured default for `linear` and `all`
-- Entries carry `feed` (`linear` / `streaming`) alongside the episode; a merged query dedupes and sorts by `airstamp`
-- Each entry's `show` is a compact reference — `id`, `name`, `url`, `type`, `genres`, and the channel — since a day's listing repeats a show on every episode; `tvmaze_get_show` returns the full profile
-- `applied_feeds` names exactly which upstream feeds answered, e.g. `["linear:GB","web:GB","web:global"]`; one feed failing degrades to a notice instead of failing the call
-- Optional `channel` matches a trimmed, case-insensitive exact channel name before paging; blanks are unset. No matches yield bounded available-channel guidance; a past-end page keeps its filtered total
-- Positive integer `limit` (default 50, clamped to 250 with actual returned count) sets each page size, including continuation calls
+- `scope` picks the feed: `linear` is one country's broadcast and cable networks plus its own streaming services, `streaming` is global services when `country` is omitted and that country's local ones when given, `all` merges both
+- `date` defaults to today in the requested `timezone`; `country` is ISO 3166-1 alpha-2 (the United Kingdom is `GB`) and falls back to the configured default for `linear` and `all`; optional `channel` filters by exact, case-insensitive channel name; `limit` defaults to 50 (max 250)
+- Entries carry `feed` (`linear` / `streaming`) and a compact `show` reference (`tvmaze_get_show` returns the full profile). `applied_feeds` names the feeds that answered, e.g. `["linear:GB","web:GB","web:global"]`; one failing feed degrades to a notice instead of failing the call
 
 ---
 
 ### `tvmaze_get_cast` <sub>tool</sub>
 
-- `scope: "show"` returns the main cast with character names, plus the show's crew when `include_crew` is set; `scope: "episode"` returns that episode's guest cast, plus its guest crew (director, writers) when `include_crew` is set, still in a single upstream request
-- Paged on both scopes: positive integer `limit` (default 50, clamped to 250 with actual returned count) and `cursor`, with cast rows first and crew rows after them in one sequence, split back into `cast` and `crew` on each page; `cast_total` / `crew_total` and the enrichment `totalCount` count every page
-- Optional `name` matches a trimmed, case-insensitive substring in performer, character, or crew role before paging; blanks are unset. Crew is searched only with `include_crew: true`; totals count filtered credits
-- Cast credits carry `as_self` and `voice_only`; crew credits carry `credit_type` and no character
-- TVmaze records no recurring-versus-guest distinction on a show's cast list, so absence from it is not evidence a performer never appeared — check an episode's guest cast
-- Missing credits arrive as a notice, not an error; community coverage thins on smaller titles
+- `scope: "show"` returns the main cast with character names; `scope: "episode"` returns that episode's guest cast. `include_crew` adds the show's crew, or the episode's guest crew (director, writers)
+- Optional `name` filters by substring of performer, character, or crew role (crew only with `include_crew: true`). Paged with `limit` (default 50, max 250) and `cursor`; `cast_total` / `crew_total` count all matching credits
+- Cast credits carry `as_self` and `voice_only`; crew credits carry `credit_type` and no character. A show's cast list does not separate recurring from guest performers, so check an episode's guest cast. Missing credits arrive as a notice, not an error
 
 ### `tvmaze_get_person` <sub>tool</sub>
 
-- Supply exactly one of `query` (trimmed name search; blank is unset) or positive `person_id` (from cast credits or a candidate)
-- Search returns compact candidates and real source scores, never an automatic selection. Choose an id even for one match; ten candidates disclose a possible source cap and suggest narrowing, with no search cursor
-- An id returns the person and one `credit_kind`: `cast` (default), `guest`, or `crew`. Selectors, `limit`, and `cursor` apply only to the id path
-- Credits keep source order and compact show, episode, and character identities, URLs, roles, and self/voice flags when available. Guest `episode_id` chains to `tvmaze_get_cast`; `show_id` chains to `tvmaze_get_show` or `tvmaze_get_episodes`. Missing embeds remain absent; credits are never hydrated individually
-- Paging defaults to 50 and clamps above 250 with honest counts; the current call's limit applies on continuation. No candidates or credits is an empty success; a missing id is `person_not_found`
+- Supply exactly one of `query` (name search) or `person_id` (from cast credits or a candidate). Search returns compact candidates with source scores and never picks one for you; ten candidates may mean the source cap, so narrow the name
+- A `person_id` returns the person and one `credit_kind`: `cast` (default), `guest`, or `crew`; `limit` (default 50, max 250) and `cursor` apply only here. Guest `episode_id` chains to `tvmaze_get_cast`; `show_id` chains to `tvmaze_get_show` or `tvmaze_get_episodes`
+- No candidates or credits is an empty success; a missing id is `person_not_found`
 
 ## Features
 
@@ -129,17 +113,16 @@ Built on [`@cyanheads/mcp-ts-core`](https://github.com/cyanheads/mcp-ts-core): s
 TVmaze-specific:
 
 - Keyless — no account, no API key, and every tool works on a fresh install with nothing configured
-- Upstream requests are paced under the documented per-IP budget with bounded concurrency and a 429 cooldown that honors `Retry-After`, in front of an in-process response cache shared across tenants
-- Air times are computed from `airstamp` alone; the `airdate` / `airtime` pair is the broadcaster's programming-day convention and diverges by a full day on overnight slots
-- Community-authored HTML summaries are stripped to plain text, never rewritten or spell-corrected
+- Requests are paced under TVmaze's per-IP limit, back off on 429 (honoring `Retry-After`), and are cached in-process
+- Air times are computed from `airstamp` alone, since `airdate` / `airtime` can be a full day off on overnight slots
+- Community-authored HTML summaries are stripped to plain text
 
 Agent-friendly output:
 
-- No fabricated clock times — a record with no announced broadcast time reports `time_known: false` and a date only, and absent upstream fields render as `Not available` rather than `0` or `""`
-- Typed error contracts on every tool — a `reason` plus a recovery hint that reaches both `structuredContent` and the text surface
-- Resolution misses are results, not failures: `tvmaze_lookup_show` and the title arm of `tvmaze_get_next_episode` return `found: false` with `guidance` for the next call
-- Enrichment states what a call actually covered — the echoed query, `applied_feeds`, pre-page totals, and truncation against the source's own caps
-- Names and labels render as literal Markdown text; structured strings and URLs retain their original values, while synopsis emphasis is preserved
+- No fabricated clock times: a record with no announced time reports `time_known: false` and a date only, and absent fields render as `Not available` rather than `0` or `""`
+- Typed errors on every tool, each with a `reason` and a recovery hint
+- Resolution misses are results: `tvmaze_lookup_show` and the title arm of `tvmaze_get_next_episode` return `found: false` with `guidance` for the next call
+- Output states what a call covered: the echoed query, `applied_feeds`, pre-page totals, and truncation against the source's caps
 
 ## Data and licensing
 
@@ -269,7 +252,7 @@ cp .env.example .env
 | `MCP_TRANSPORT_TYPE` | Transport: `stdio` or `http`. | `stdio` |
 | `MCP_HTTP_PORT` | Port for the HTTP server. | `3010` |
 | `MCP_HTTP_ENDPOINT_PATH` | Path the MCP server is mounted at. | `/mcp` |
-| `MCP_SESSION_MODE` | HTTP session mode. This server declares `stateless` in code — no tool asks the caller for input mid-handler. | `stateless` |
+| `MCP_SESSION_MODE` | HTTP session mode; this server is always `stateless`. | `stateless` |
 | `MCP_AUTH_MODE` | Auth mode: `none`, `jwt`, or `oauth`. | `none` |
 | `MCP_LOG_LEVEL` | Log level (RFC 5424). | `info` |
 | `LOGS_DIR` | Directory for log files (Node.js only). | `<project-root>/logs` |
