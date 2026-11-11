@@ -1,6 +1,6 @@
 # tvmaze-mcp-server - Directory Structure
 
-Generated on: 2026-10-16 14:29:14
+Generated on: 2026-11-11 05:36:38
 
 ```text
 tvmaze-mcp-server/
@@ -38,6 +38,8 @@ tvmaze-mcp-server/
 │   ├── add-resource/
 │   │   └── SKILL.md
 │   ├── add-service/
+│   │   └── SKILL.md
+│   ├── add-skill/
 │   │   └── SKILL.md
 │   ├── add-test/
 │   │   └── SKILL.md
@@ -135,6 +137,9 @@ tvmaze-mcp-server/
 │   ├── prune-musl-packages.ts
 │   ├── release-github.ts
 │   └── tree.ts
+├── skills/
+│   └── tvmaze-guide/
+│       └── SKILL.md
 ├── src/
 │   ├── config/
 │   │   └── server-config.ts
@@ -194,7 +199,9 @@ tvmaze-mcp-server/
 ├── Dockerfile
 ├── LICENSE
 ├── manifest.json
+├── mcp.json
 ├── package.json
+├── plugin.json
 ├── README.md
 ├── server.json
 ├── tsconfig.build.json

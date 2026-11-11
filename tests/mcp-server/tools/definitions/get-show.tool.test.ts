@@ -31,10 +31,16 @@ const getHttp = installTvmazeToolHarness();
 const EMBED_QS = 'embed[]=nextepisode&embed[]=previousepisode&embed[]=seasons';
 
 describe('tvmaze_get_show', () => {
-  it('renders literal Markdown names while preserving summary emphasis and raw URLs', () => {
+  it('renders literal Markdown names, summary emphasis, links, images, and cursors', () => {
     expect(inline('M*A*S*H [x] \\ <i>')).toBe('M\\*A\\*S\\*H \\[x\\] \\\\ \\<i\\>');
     expect(field('genres', ['M*A*S*H', '[Drama]'])).toBe('**genres:** M\\*A\\*S\\*H, \\[Drama\\]');
-    expect(field('url', 'https://example.test/a_b')).toBe('**url:** https://example.test/a_b');
+    expect(field('url', 'https://example.test/a_b')).toBe(
+      '**url:** [Open link](<https://example.test/a_b>)',
+    );
+    expect(field('image_url', 'https://example.test/a_b.png')).toBe(
+      '**image_url:** ![Image](<https://example.test/a_b.png>)',
+    );
+    expect(field('next_cursor', 'a_b')).toBe('**next_cursor:** a_b');
     expect(summaryLines('**Bold** and *italic*')).toEqual([
       '**summary:**',
       '> **Bold** and *italic*',
@@ -64,11 +70,16 @@ describe('tvmaze_get_show', () => {
     {
       network: { id: 1, name: 'Network', country: { timezone: 'America/New_York' } },
       webChannel: { id: 2, name: 'Web', country: { timezone: 'Europe/London' } },
-      expected: 'Europe/London',
+      expected: 'America/New_York',
     },
     {
       network: { id: 1, name: 'Network', country: { timezone: 'America/New_York' } },
       webChannel: { id: 2, name: 'Web', country: null },
+      expected: 'America/New_York',
+    },
+    {
+      network: { id: 1, name: 'Network', country: null },
+      webChannel: { id: 2, name: 'Web', country: { timezone: 'Europe/London' } },
       expected: undefined,
     },
     { network: null, webChannel: null, expected: undefined },
@@ -117,7 +128,7 @@ describe('tvmaze_get_show', () => {
     expect(result.structuredContent).toMatchObject({
       show: { id: 169, name: 'Breaking Bad', schedule_days: ['Sunday'], schedule_time: '22:00' },
       seasons: [{ number: 1 }, { number: 2 }],
-      next_episode: { id: 20, name: 'Next Up' },
+      next_episode: { id: 20, name: 'Next Up', airdate: '2008-01-20' },
       previous_episode: { id: 19, name: 'Last One' },
       timezone: 'America/Los_Angeles',
     });
@@ -126,35 +137,54 @@ describe('tvmaze_get_show', () => {
     expect(text).toContain('## Seasons');
     expect(text).toContain('## Next episode');
     expect(text).toContain('Next Up');
+    expect(text).toContain('**airdate:** 2008-01-20');
     expect(text).toContain('## Previous episode');
     expect(text).toContain('Last One');
   });
 
-  it('renders each season as one pinned seven-column table row', async () => {
+  it('renders each season as one table row with both carriers', async () => {
     getHttp().route({
       match: `${TVMAZE_TEST_BASE_URL}/shows/169?${EMBED_QS}`,
       respond: Response.json(
         rawShow({
           _embedded: {
-            seasons: [rawSeason(), rawSeason({ id: 2, number: 2, name: 'The Return' })],
+            seasons: [
+              rawSeason(),
+              rawSeason({
+                id: 2,
+                number: 2,
+                name: 'The Return',
+                webChannel: { name: 'Web' },
+              }),
+            ],
           },
         }),
       ),
     });
 
     const result = await runToolContract(getShow, { show_id: 169 });
+    expect(result.structuredContent).toMatchObject({
+      seasons: [
+        { network: { name: 'AMC' } },
+        {
+          channel: 'Web',
+          network: { name: 'AMC' },
+          web_channel: { name: 'Web' },
+        },
+      ],
+    });
     const text = (result.content[0] as { text: string }).text;
     expect(text).toContain(
       [
-        '| number | name | episode_order | premiere_date | end_date | channel | id |',
-        '|---|---|---|---|---|---|---|',
-        '| 1 | Not available | 7 | 2008-01-20 | 2008-03-09 | AMC | 1 |',
-        '| 2 | The Return | 7 | 2008-01-20 | 2008-03-09 | AMC | 2 |',
+        '| number | name | episode_order | premiere_date | end_date | channel | id | network | web_channel |',
+        '|---|---|---|---|---|---|---|---|---|',
+        '| 1 | Not available | 7 | 2008-01-20 | 2008-03-09 | AMC | 1 | AMC (country: US, timezone: America/New_York) | Not available |',
+        '| 2 | The Return | 7 | 2008-01-20 | 2008-03-09 | Web | 2 | AMC (country: US, timezone: America/New_York) | Web (country: Not available, timezone: Not available) |',
       ].join('\n'),
     );
   });
 
-  it('escapes a pipe in a season name or channel so the row keeps its seven columns', async () => {
+  it('escapes a pipe in a season name or carrier so the row keeps its nine columns', async () => {
     getHttp().route({
       match: `${TVMAZE_TEST_BASE_URL}/shows/169?${EMBED_QS}`,
       respond: Response.json(
@@ -192,7 +222,7 @@ describe('tvmaze_get_show', () => {
     const cells = (row: string) => row.split(/(?<!\\)(?:\\\\)*\|/).slice(1, -1);
     const rows = text.split('\n').filter((line) => /^\| [23] \|/.test(line));
     expect(rows).toHaveLength(2);
-    for (const row of rows) expect(cells(row)).toHaveLength(7);
+    for (const row of rows) expect(cells(row)).toHaveLength(9);
   });
 
   it('describes local_date on every tool that returns an episode for both time_known cases', () => {

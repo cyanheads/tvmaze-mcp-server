@@ -7,6 +7,26 @@
  */
 
 import { z } from '@cyanheads/mcp-ts-core';
+import { markdownImage, markdownLink } from '@cyanheads/mcp-ts-core/utils';
+
+const Carrier = z.object({
+  name: z.string().describe('Carrier name as TVmaze records it.'),
+  country: z.string().optional().describe('ISO 3166-1 alpha-2 country of this carrier.'),
+  timezone: z.string().optional().describe('IANA timezone recorded for this carrier.'),
+});
+
+const carriers = {
+  network: Carrier.optional().describe('Broadcast or cable network, when recorded.'),
+  web_channel: Carrier.optional().describe('Streaming service, when recorded.'),
+};
+
+/** Source date shared by episode and guest credit projections. */
+export const Airdate = z
+  .string()
+  .optional()
+  .describe(
+    'TVmaze date label (YYYY-MM-DD): the programming day or announced release date. Preserve it as a label without combining it with a clock time.',
+  );
 
 // ---------------------------------------------------------------------------
 // Schemas
@@ -68,6 +88,7 @@ export const ShowSummary = z.object({
     .string()
     .optional()
     .describe('ISO 3166-1 alpha-2 country of the channel. Absent for a global streaming service.'),
+  ...carriers,
   externals: z
     .object({
       imdb: z.string().optional().describe('IMDb title id, e.g. "tt0903747".'),
@@ -102,6 +123,8 @@ export const ScheduleShow = ShowSummary.pick({
   channel: true,
   channel_type: true,
   channel_country: true,
+  network: true,
+  web_channel: true,
   genres: true,
 });
 
@@ -137,6 +160,7 @@ export const Episode = z.object({
     .describe(
       'Air time as an ISO 8601 UTC timestamp. Authoritative — compute from this field and nothing else.',
     ),
+  airdate: Airdate,
   local_date: z
     .string()
     .describe(
@@ -194,6 +218,7 @@ export const Season = z.object({
     .describe(
       'Network or streaming service that carried this season, including when it matches the show.',
     ),
+  ...carriers,
 });
 
 /** One person credited on a show or episode. */
@@ -271,12 +296,21 @@ function present(value: unknown): string {
 
 /** Render one labelled field, preserving absence rather than inventing a value. */
 export function field(label: string, value: unknown): string {
-  const raw =
-    label === 'url' ||
-    label.endsWith('_url') ||
-    label === 'official_site' ||
-    label === 'next_cursor';
-  return `**${label}:** ${raw && typeof value === 'string' ? flatten(value) || NOT_AVAILABLE : present(value)}`;
+  const prefix = `**${label}:**`;
+  if (typeof value === 'string' && value.trim()) {
+    if (label === 'next_cursor') return `${prefix} ${value}`;
+    if (label.endsWith('image_url')) return `${prefix} ${markdownImage('Image', value)}`;
+    if (label === 'url' || label.endsWith('_url') || label === 'official_site') {
+      return `${prefix} ${markdownLink('Open link', value)}`;
+    }
+  }
+  return `${prefix} ${present(value)}`;
+}
+
+function carrierText(carrier: z.infer<typeof Carrier> | undefined): string {
+  return carrier
+    ? `${inline(carrier.name)} (country: ${present(carrier.country)}, timezone: ${present(carrier.timezone)})`
+    : NOT_AVAILABLE;
 }
 
 /** Render a populated optional notice as literal text with the standard quote prefix. */
@@ -314,6 +348,7 @@ export function showSummaryLines(show: z.infer<typeof ShowSummary>): string[] {
     `${field('premiered', show.premiered)} | ${field('ended', show.ended)}`,
     field('genres', show.genres),
     `${field('channel', show.channel)} | ${field('channel_type', show.channel_type)} | ${field('channel_country', show.channel_country)}`,
+    `**network:** ${carrierText(show.network)} | **web_channel:** ${carrierText(show.web_channel)}`,
     `${field('runtime_minutes', show.runtime_minutes)} | ${field('average_runtime_minutes', show.average_runtime_minutes)}`,
     field('rating', show.rating),
     `**externals:** imdb ${present(show.externals.imdb)} · thetvdb ${present(show.externals.thetvdb)} · tvrage ${present(show.externals.tvrage)}`,
@@ -331,6 +366,7 @@ export function scheduleShowLines(show: z.infer<typeof ScheduleShow>): string[] 
     `${field('id', show.id)} | ${field('url', show.url)}`,
     `${field('type', show.type)} | ${field('genres', show.genres)}`,
     `${field('channel', show.channel)} | ${field('channel_type', show.channel_type)} | ${field('channel_country', show.channel_country)}`,
+    `**network:** ${carrierText(show.network)} | **web_channel:** ${carrierText(show.web_channel)}`,
   ];
 }
 
@@ -338,7 +374,7 @@ export function scheduleShowLines(show: z.infer<typeof ScheduleShow>): string[] 
 export function episodeLines(episode: z.infer<typeof Episode>): string[] {
   return [
     `${field('name', episode.name)} | ${field('id', episode.id)} | ${field('season', episode.season)} | ${field('number', episode.number)} | ${field('type', episode.type)}`,
-    `${field('local_date', episode.local_date)} | ${field('local_time', episode.local_time)}${episode.time_known ? '' : ' (time not announced)'}`,
+    `${field('airdate', episode.airdate)} | ${field('local_date', episode.local_date)} | ${field('local_time', episode.local_time)}${episode.time_known ? '' : ' (time not announced)'}`,
     `${field('time_known', episode.time_known)} | ${field('airstamp', episode.airstamp)} | ${field('runtime_minutes', episode.runtime_minutes)} | ${field('rating', episode.rating)}`,
     `${field('url', episode.url)} | ${field('image_url', episode.image_url)}`,
     ...summaryLines(episode.summary),
@@ -347,13 +383,13 @@ export function episodeLines(episode: z.infer<typeof Episode>): string[] {
 
 /** Header rows for the season table {@link seasonRow} fills. */
 export const SEASON_TABLE_HEADER = [
-  '| number | name | episode_order | premiere_date | end_date | channel | id |',
-  '|---|---|---|---|---|---|---|',
+  '| number | name | episode_order | premiere_date | end_date | channel | id | network | web_channel |',
+  '|---|---|---|---|---|---|---|---|---|',
 ];
 
 /** Every {@link Season} field, as one row of the season table. */
 export function seasonRow(season: z.infer<typeof Season>): string {
-  return `| ${present(season.number)} | ${present(season.name)} | ${present(season.episode_order)} | ${present(season.premiere_date)} | ${present(season.end_date)} | ${present(season.channel)} | ${present(season.id)} |`;
+  return `| ${present(season.number)} | ${present(season.name)} | ${present(season.episode_order)} | ${present(season.premiere_date)} | ${present(season.end_date)} | ${present(season.channel)} | ${present(season.id)} | ${carrierText(season.network)} | ${carrierText(season.web_channel)} |`;
 }
 
 /** Every {@link CastCredit} field. */

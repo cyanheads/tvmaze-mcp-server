@@ -217,6 +217,7 @@ describe('normalizeShow', () => {
       channel: 'AMC',
       channel_type: 'network',
       channel_country: 'US',
+      network: { name: 'AMC', country: 'US', timezone: 'America/New_York' },
       externals: { tvrage: 18164, thetvdb: 81189, imdb: 'tt0903747' },
     });
     expect(show.summary).toBe(
@@ -264,6 +265,7 @@ describe('normalizeEpisode — air time resolution', () => {
     const episode = normalizeEpisode(rawEpisodeNoTime(), 'America/Los_Angeles');
     expect(episode.time_known).toBe(false);
     expect(episode.local_date).toBe('2026-09-18');
+    expect(episode.airdate).toBe('2026-09-18');
     expect(episode).not.toHaveProperty('local_time');
   });
 
@@ -271,6 +273,11 @@ describe('normalizeEpisode — air time resolution', () => {
     const episode = normalizeEpisode(rawEpisodeSpecial(), 'UTC');
     expect(episode).not.toHaveProperty('number');
     expect(episode.type).toBe('significant_special');
+  });
+
+  it.each([null, '', '  '])('omits a missing episode airdate (%j)', (airdate) => {
+    const episode = normalizeEpisode(rawEpisode({ airdate }), 'UTC');
+    expect(episode).not.toHaveProperty('airdate');
   });
 
   it('renders the correct local time across a DST boundary in one zone', () => {
@@ -393,6 +400,7 @@ describe('normalizeScheduleShow', () => {
       channel: 'AMC',
       channel_type: 'network',
       channel_country: 'US',
+      network: { name: 'AMC', country: 'US', timezone: 'America/New_York' },
     });
   });
 
@@ -405,6 +413,7 @@ describe('normalizeScheduleShow', () => {
       genres: ['Drama'],
       channel: 'Netflix',
       channel_type: 'web_channel',
+      web_channel: { name: 'Netflix' },
     });
     expect(normalizeScheduleShow(rawShowSparse())).toEqual({
       id: 999,

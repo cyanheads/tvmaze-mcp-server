@@ -6,7 +6,7 @@ import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
 import { getTvmazeService } from '@/services/tvmaze/tvmaze-service.js';
 import { DEFAULT_PAGE_SIZE, enrichPage, pageOf } from './paging.js';
-import { field, inline, noticeText } from './shared-schemas.js';
+import { Airdate, field, inline, noticeText } from './shared-schemas.js';
 
 const Person = z.object({
   id: z.number().describe('TVmaze person id; pass as person_id to select this person.'),
@@ -24,12 +24,27 @@ const Credit = z.object({
     .describe('TVmaze show id for tvmaze_get_show or tvmaze_get_episodes.'),
   show_name: z.string().optional().describe('Show title when available.'),
   show_url: z.string().optional().describe('Canonical TVmaze show page for attribution.'),
+  show_premiered: z
+    .string()
+    .optional()
+    .describe('First air date of the show on cast and crew credits.'),
+  show_ended: z.string().optional().describe('Last air date of the show on cast and crew credits.'),
+  show_status: z
+    .string()
+    .optional()
+    .describe('Production status of the show on cast and crew credits.'),
   episode_id: z
     .number()
     .optional()
     .describe('TVmaze episode id for tvmaze_get_cast with scope "episode".'),
   episode_name: z.string().optional().describe('Episode title on guest credits when available.'),
   episode_url: z.string().optional().describe('Canonical TVmaze episode page for attribution.'),
+  season: z.number().optional().describe('Season number on a guest episode credit.'),
+  episode_number: z
+    .number()
+    .optional()
+    .describe('Number within the season on a guest episode credit.'),
+  airdate: Airdate,
   character_id: z.number().optional().describe('TVmaze character id when embedded.'),
   character_name: z.string().optional().describe('Character name when embedded.'),
   character_url: z.string().optional().describe('Canonical TVmaze character page when embedded.'),
@@ -227,9 +242,15 @@ export const getPerson = tool('tvmaze_get_person', {
           field('show_id', credit.show_id),
           field('show_name', credit.show_name),
           field('show_url', credit.show_url),
+          field('show_premiered', credit.show_premiered),
+          field('show_ended', credit.show_ended),
+          field('show_status', credit.show_status),
           field('episode_id', credit.episode_id),
           field('episode_name', credit.episode_name),
           field('episode_url', credit.episode_url),
+          field('season', credit.season),
+          field('episode_number', credit.episode_number),
+          field('airdate', credit.airdate),
           field('character_id', credit.character_id),
           field('character_name', credit.character_name),
           field('character_url', credit.character_url),

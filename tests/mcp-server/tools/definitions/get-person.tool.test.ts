@@ -208,12 +208,19 @@ describe('tvmaze_get_person', () => {
         kind === 'guest'
           ? {
               episode: {
-                ...rawEpisode(),
+                ...rawEpisode({ season: 0, number: 0, airdate: '2005-11-30' }),
                 _links: { show: { href: 'https://api.tvmaze.com/shows/195', name: 'Bates Motel' } },
               },
               character,
             }
-          : { show: rawShow(), ...(kind === 'cast' ? { character } : {}) };
+          : {
+              show: rawShow({ premiered: '2008-01-20', ended: '2019-10-11', status: 'Ended' }),
+              ...(kind === 'cast' ? { character } : {}),
+            };
+      const sparse =
+        kind === 'guest'
+          ? { episode: rawEpisode({ number: null, airdate: '' }) }
+          : { show: rawShow({ premiered: null, ended: '', status: null }) };
       getHttp().route({ match: `${BASE}/people/1`, respond: () => Response.json(person) });
       getHttp().route({
         match: `${BASE}/people/1/${route}`,
@@ -226,10 +233,14 @@ describe('tvmaze_get_person', () => {
               ...(kind === 'crew' ? { type: 'Co-Executive Producer' } : {}),
             },
             {},
-            { _embedded: embedded },
+            { _embedded: sparse },
           ]),
       });
       const first = await runToolContract(getPerson, { person_id: 1, credit_kind: kind, limit: 1 });
+      expect(getHttp().calls.map((call) => call.request.url)).toEqual([
+        `${BASE}/people/1`,
+        `${BASE}/people/1/${route}`,
+      ]);
       expect(first.structuredContent).toMatchObject({
         kind: 'person',
         person: { id: 1 },
@@ -247,7 +258,19 @@ describe('tvmaze_get_person', () => {
         expect(body.credits[0]).toMatchObject({
           episode_id: 11,
           show_url: 'https://www.tvmaze.com/shows/195',
+          season: 0,
+          episode_number: 0,
+          airdate: '2005-11-30',
         });
+      else
+        expect(body.credits[0]).toMatchObject({
+          show_premiered: '2008-01-20',
+          show_ended: '2019-10-11',
+          show_status: 'Ended',
+        });
+      expect(textOf(first)).toContain(
+        kind === 'guest' ? '**airdate:** 2005-11-30' : '**show_premiered:** 2008-01-20',
+      );
       expect(textOf(first)).toContain('**show_id:**');
       const next = await runToolContract(getPerson, {
         person_id: 1,
@@ -261,6 +284,16 @@ describe('tvmaze_get_person', () => {
         cap: 250,
         has_more: false,
       });
+      const [absent, incomplete] = (next.structuredContent as typeof body).credits;
+      expect(absent).toEqual({});
+      for (const field of [
+        'episode_number',
+        'airdate',
+        'show_premiered',
+        'show_ended',
+        'show_status',
+      ])
+        expect(incomplete).not.toHaveProperty(field);
       expect(textOf(next)).toContain('returned 2 credits');
       const past = await runToolContract(getPerson, {
         person_id: 1,

@@ -164,7 +164,7 @@ export interface RawSearchHit {
 // ---------------------------------------------------------------------------
 
 /** Show identity and profile summary, shared by search results, lookups, and episode listings. */
-export interface ShowSummary {
+export interface ShowSummary extends Carriers {
   average_runtime_minutes?: number;
   channel?: string;
   channel_country?: string;
@@ -185,6 +185,19 @@ export interface ShowSummary {
   url: string;
 }
 
+/** A named TVmaze carrier with its own optional country and clock. */
+export interface Carrier {
+  country?: string;
+  name: string;
+  timezone?: string;
+}
+
+/** The network and web channel recorded for the same show or season. */
+export interface Carriers {
+  network?: Carrier;
+  web_channel?: Carrier;
+}
+
 /** A search result — a show plus the source's relevance score. */
 export interface ShowSearchHit extends ShowSummary {
   match_score: number;
@@ -200,6 +213,7 @@ export interface ShowProfile extends ShowSummary {
 
 /** An episode with its air time resolved into the requested timezone. */
 export interface Episode {
+  airdate?: string;
   airstamp: string;
   id: number;
   image_url?: string;
@@ -217,7 +231,7 @@ export interface Episode {
 }
 
 /** A season header. */
-export interface Season {
+export interface Season extends Carriers {
   channel?: string;
   end_date?: string;
   episode_order?: number;
@@ -253,10 +267,11 @@ export interface ShowDetail {
  * show on every episode it airs, so the row holds identity and channel only;
  * the full profile is one `/shows/{id}` call away.
  */
-export type ScheduleShow = Pick<
-  ShowSummary,
-  'id' | 'name' | 'url' | 'type' | 'channel' | 'channel_type' | 'channel_country' | 'genres'
->;
+export type ScheduleShow = Carriers &
+  Pick<
+    ShowSummary,
+    'id' | 'name' | 'url' | 'type' | 'channel' | 'channel_type' | 'channel_country' | 'genres'
+  >;
 
 /** A schedule row — an episode plus the show it belongs to and the feed it came from. */
 export interface ScheduleEntry extends Episode {
@@ -296,6 +311,7 @@ export interface RawPersonCredit {
 
 /** Compact credit references, without repeated show/episode profiles. */
 export interface PersonCredit {
+  airdate?: string;
   as_self?: boolean;
   character_id?: number;
   character_name?: string;
@@ -303,9 +319,14 @@ export interface PersonCredit {
   credit_type?: string;
   episode_id?: number;
   episode_name?: string;
+  episode_number?: number;
   episode_url?: string;
+  season?: number;
+  show_ended?: string;
   show_id?: number;
   show_name?: string;
+  show_premiered?: string;
+  show_status?: string;
   show_url?: string;
   voice_only?: boolean;
 }

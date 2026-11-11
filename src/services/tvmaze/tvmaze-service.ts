@@ -20,6 +20,8 @@ import { createPacer, fetchWithTimeout, withRetry } from '@cyanheads/mcp-ts-core
 
 import { getServerConfig } from '@/config/server-config.js';
 import type {
+  Carrier,
+  Carriers,
   CastCredit,
   Episode,
   LookupSource,
@@ -27,6 +29,7 @@ import type {
   PersonCredit,
   PersonCreditKind,
   RawCastCredit,
+  RawChannel,
   RawCrewCredit,
   RawEpisode,
   RawGuestCrewCredit,
@@ -244,25 +247,46 @@ export function normalizeCountry(code: string): string {
   return upper === 'UK' ? 'GB' : upper;
 }
 
-/** Pick the channel carrying a show: the streaming service when present, else the network. */
-function channelOf(
-  raw: RawShow,
-): Pick<ShowSummary, 'channel' | 'channel_type' | 'channel_country'> {
-  const web = raw.webChannel?.name ? raw.webChannel : undefined;
-  const network = raw.network?.name ? raw.network : undefined;
-  const picked = web ?? network;
-  if (!picked?.name) return {};
+function normalizeCarrier(raw: RawChannel | null | undefined): Carrier | undefined {
+  if (!raw?.name?.trim()) return undefined;
   return {
-    channel: picked.name,
-    channel_type: web ? 'web_channel' : 'network',
-    ...(picked.country?.code ? { channel_country: picked.country.code } : {}),
+    name: raw.name,
+    ...(raw.country?.code?.trim() ? { country: raw.country.code } : {}),
+    ...(raw.country?.timezone?.trim() ? { timezone: raw.country.timezone } : {}),
+  };
+}
+
+function carriersOf(raw: Pick<RawShow, 'network' | 'webChannel'>): Carriers {
+  const network = normalizeCarrier(raw.network);
+  const web = normalizeCarrier(raw.webChannel);
+  return { ...(network ? { network } : {}), ...(web ? { web_channel: web } : {}) };
+}
+
+function selectedCarrier(carriers: Carriers, preferred: keyof Carriers) {
+  const alternate = preferred === 'network' ? 'web_channel' : 'network';
+  const type = carriers[preferred] ? preferred : alternate;
+  const carrier = carriers[type];
+  return carrier ? { type, carrier } : undefined;
+}
+
+function channelFields(selected: ReturnType<typeof selectedCarrier>) {
+  if (!selected) return {};
+  const { type, carrier } = selected;
+  return {
+    channel: carrier.name,
+    channel_type: type,
+    ...(carrier.country ? { channel_country: carrier.country } : {}),
   };
 }
 
 /** Normalize a show record into the show summary search, lookup, and episode tools share. */
-export function normalizeShow(raw: RawShow): ShowSummary {
+export function normalizeShow(
+  raw: RawShow,
+  preferred: keyof Carriers = 'web_channel',
+): ShowSummary {
   const externals = raw.externals ?? {};
   const summary = raw.summary ? stripHtml(raw.summary) : '';
+  const carriers = carriersOf(raw);
   return {
     id: raw.id,
     name: raw.name,
@@ -278,7 +302,8 @@ export function normalizeShow(raw: RawShow): ShowSummary {
       ? { average_runtime_minutes: raw.averageRuntime }
       : {}),
     ...(typeof raw.rating?.average === 'number' ? { rating: raw.rating.average } : {}),
-    ...channelOf(raw),
+    ...carriers,
+    ...channelFields(selectedCarrier(carriers, preferred)),
     externals: {
       ...(externals.imdb ? { imdb: externals.imdb } : {}),
       ...(typeof externals.thetvdb === 'number' ? { thetvdb: externals.thetvdb } : {}),
@@ -290,30 +315,51 @@ export function normalizeShow(raw: RawShow): ShowSummary {
 }
 
 /** Normalize a show record into the compact reference a schedule row carries. */
-export function normalizeScheduleShow(raw: RawShow): ScheduleShow {
+export function normalizeScheduleShow(
+  raw: RawShow,
+  feed: ScheduleEntry['feed'] = 'streaming',
+): ScheduleShow {
+  const carriers = carriersOf(raw);
   return {
     id: raw.id,
     name: raw.name,
     url: raw.url,
     ...(raw.type ? { type: raw.type } : {}),
     genres: raw.genres ?? [],
-    ...channelOf(raw),
+    ...carriers,
+    ...channelFields(selectedCarrier(carriers, feed === 'linear' ? 'network' : 'web_channel')),
+  };
+}
+
+/** Preserve the first schedule row and fill its absent carriers from a duplicate. */
+export function mergeScheduleCarriers(first: ScheduleEntry, later: ScheduleEntry): ScheduleEntry {
+  const network = first.show.network ?? later.show.network;
+  const web = first.show.web_channel ?? later.show.web_channel;
+  if (network === first.show.network && web === first.show.web_channel) return first;
+  const { channel, channel_type, channel_country, ...show } = first.show;
+  const carriers = { ...(network ? { network } : {}), ...(web ? { web_channel: web } : {}) };
+  return {
+    ...first,
+    show: {
+      ...show,
+      ...carriers,
+      ...channelFields(
+        selectedCarrier(carriers, first.feed === 'linear' ? 'network' : 'web_channel'),
+      ),
+    },
   };
 }
 
 /** Normalize a show record into the full profile `/shows/{id}` carries. */
 export function normalizeShowProfile(raw: RawShow): ShowProfile {
-  const channel = raw.webChannel?.name
-    ? raw.webChannel
-    : raw.network?.name
-      ? raw.network
-      : undefined;
+  const show = normalizeShow(raw, 'network');
+  const timezone = show.channel_type && show[show.channel_type]?.timezone;
   return {
-    ...normalizeShow(raw),
+    ...show,
     ...(raw.officialSite ? { official_site: raw.officialSite } : {}),
     schedule_days: raw.schedule?.days ?? [],
     ...(raw.schedule?.time ? { schedule_time: raw.schedule.time } : {}),
-    ...(channel?.country?.timezone ? { schedule_timezone: channel.country.timezone } : {}),
+    ...(timezone ? { schedule_timezone: timezone } : {}),
   };
 }
 
@@ -327,6 +373,7 @@ export function normalizeEpisode(raw: RawEpisode, timeZone: string): Episode {
     season: raw.season,
     ...(typeof raw.number === 'number' ? { number: raw.number } : {}),
     type: raw.type,
+    ...(raw.airdate?.trim() ? { airdate: raw.airdate } : {}),
     airstamp: raw.airstamp,
     ...resolveAirTime(raw, timeZone),
     ...(typeof raw.runtime === 'number' ? { runtime_minutes: raw.runtime } : {}),
@@ -338,7 +385,8 @@ export function normalizeEpisode(raw: RawEpisode, timeZone: string): Episode {
 
 /** Normalize a season header. */
 export function normalizeSeason(raw: RawSeason): Season {
-  const channel = raw.webChannel?.name ?? raw.network?.name;
+  const carriers = carriersOf(raw);
+  const channel = selectedCarrier(carriers, 'web_channel')?.carrier.name;
   return {
     id: raw.id,
     number: raw.number,
@@ -346,6 +394,7 @@ export function normalizeSeason(raw: RawSeason): Season {
     ...(typeof raw.episodeOrder === 'number' ? { episode_order: raw.episodeOrder } : {}),
     ...(raw.premiereDate ? { premiere_date: raw.premiereDate } : {}),
     ...(raw.endDate ? { end_date: raw.endDate } : {}),
+    ...carriers,
     ...(channel ? { channel } : {}),
   };
 }
@@ -415,7 +464,14 @@ function normalizePersonCredit(raw: RawPersonCredit, configuredOrigin: string): 
   const linkedId = match ? Number(match[1]) : undefined;
   return {
     ...(show
-      ? { show_id: show.id, show_name: show.name, show_url: show.url }
+      ? {
+          show_id: show.id,
+          show_name: show.name,
+          show_url: show.url,
+          ...(show.premiered?.trim() ? { show_premiered: show.premiered } : {}),
+          ...(show.ended?.trim() ? { show_ended: show.ended } : {}),
+          ...(show.status?.trim() ? { show_status: show.status } : {}),
+        }
       : linkedId && Number.isSafeInteger(linkedId)
         ? {
             show_id: linkedId,
@@ -424,7 +480,14 @@ function normalizePersonCredit(raw: RawPersonCredit, configuredOrigin: string): 
           }
         : {}),
     ...(episode
-      ? { episode_id: episode.id, episode_name: episode.name, episode_url: episode.url }
+      ? {
+          episode_id: episode.id,
+          episode_name: episode.name,
+          episode_url: episode.url,
+          ...(typeof episode.season === 'number' ? { season: episode.season } : {}),
+          ...(typeof episode.number === 'number' ? { episode_number: episode.number } : {}),
+          ...(episode.airdate?.trim() ? { airdate: episode.airdate } : {}),
+        }
       : {}),
     ...(character
       ? { character_id: character.id, character_name: character.name, character_url: character.url }
@@ -739,7 +802,7 @@ export class TvmazeService {
       if (!show) continue;
       entries.push({
         ...normalizeEpisode(row, timeZone),
-        show: normalizeScheduleShow(show),
+        show: normalizeScheduleShow(show, label),
         feed: label,
       });
     }

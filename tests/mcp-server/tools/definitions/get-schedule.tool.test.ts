@@ -68,6 +68,7 @@ describe('tvmaze_get_schedule', () => {
     expect(notice).not.toContain('Channel 10');
     expect(notice).toContain('incomplete');
     expect(notice).toContain('web:US feed did not respond');
+    expect(notice).not.toContain('"scope":"all"');
     expect(getHttp().calls).toHaveLength(3);
     expect(result.content.map((block) => (block as { text: string }).text).join('\n')).toContain(
       notice,
@@ -122,6 +123,11 @@ describe('tvmaze_get_schedule', () => {
         cap: 250,
         notice: expect.stringContaining('ABC News Live'),
       });
+      const notice = (miss.structuredContent as { notice: string }).notice;
+      if (scope === 'linear') expect(notice).toContain('"scope":"all","country":"US"');
+      else if (scope === 'streaming')
+        expect(notice).toContain('"scope":"streaming","country":"US"');
+      else expect(notice).not.toContain('"scope":');
       const blank = await runToolContract(getSchedule, { ...input, channel: '  ', limit: 10 });
       expect(blank.structuredContent).toMatchObject({ totalCount: 4 });
     },
@@ -242,6 +248,83 @@ describe('tvmaze_get_schedule', () => {
     );
     expect(ids.sort()).toEqual([42, 43]);
   });
+
+  it('fills a missing carrier from a duplicate and matches it before paging', async () => {
+    const date = '2026-11-03';
+    const episode = rawEpisode({ id: 3798306 });
+    const network = { name: 'ABC', country: { code: 'US', timezone: 'America/New_York' } };
+    getHttp().route({
+      match: `${TVMAZE_TEST_BASE_URL}/schedule?country=US&date=${date}`,
+      respond: Response.json([{ ...episode, show: rawShow({ network }) }]),
+    });
+    getHttp().route({
+      match: `${TVMAZE_TEST_BASE_URL}/schedule/web?country=US&date=${date}`,
+      respond: Response.json([
+        { ...episode, _embedded: { show: rawShow({ network, webChannel: { name: 'Hulu' } }) } },
+      ]),
+    });
+    getHttp().route({
+      match: `${TVMAZE_TEST_BASE_URL}/schedule/web?country=&date=${date}`,
+      respond: Response.json([]),
+    });
+
+    const result = await runToolContract(getSchedule, {
+      date,
+      scope: 'all',
+      country: 'US',
+      channel: ' hULu ',
+      limit: 1,
+    });
+    expect(result.structuredContent).toMatchObject({
+      entries: [
+        {
+          id: 3798306,
+          feed: 'linear',
+          show: {
+            channel: 'ABC',
+            channel_type: 'network',
+            channel_country: 'US',
+            network: { name: 'ABC', country: 'US', timezone: 'America/New_York' },
+            web_channel: { name: 'Hulu' },
+          },
+        },
+      ],
+      totalCount: 1,
+      has_more: false,
+    });
+    expect((result.content[0] as { text: string }).text).toContain('**web_channel:** Hulu');
+  });
+
+  it.each([
+    { country: undefined, omitted: 'country-local', query: '"scope":"streaming","country":"US"' },
+    { country: 'US', omitted: 'global', query: '"scope":"streaming"}' },
+  ])(
+    'suggests a $omitted web call on an empty streaming channel search',
+    async ({ country, omitted, query }) => {
+      const date = '2026-11-02';
+      getHttp().route({
+        match: `${TVMAZE_TEST_BASE_URL}/schedule/web?country=${country ?? ''}&date=${date}`,
+        respond: Response.json([]),
+      });
+      const result = await runToolContract(getSchedule, {
+        date,
+        country,
+        scope: 'streaming',
+        channel: 'Hulu',
+        timezone: 'America/New_York',
+      });
+      const notice = (result.structuredContent as { notice: string }).notice;
+      expect(notice).toContain(`For a ${omitted} service`);
+      expect(notice).toContain(query);
+      expect(notice).toContain('"date":"2026-11-02"');
+      expect(notice).toContain('"timezone":"America/New_York"');
+      expect(notice).toContain('"channel":"Hulu"');
+      expect(result.content.map((block) => (block as { text: string }).text).join('\n')).toContain(
+        `For a ${omitted} service`,
+      );
+      expect(getHttp().calls).toHaveLength(1);
+    },
+  );
 
   it('degrades to a partial-feed notice when one feed of scope "all" fails (non-transient, no retry)', async () => {
     getHttp().route({
@@ -386,11 +469,12 @@ describe('tvmaze_get_schedule', () => {
       'genres',
       'id',
       'name',
+      'network',
       'type',
       'url',
     ];
 
-    it('carries only the eight compact show fields, dropping summary and externals from both surfaces', async () => {
+    it('carries only compact show fields, dropping summary and externals from both surfaces', async () => {
       getHttp().route({
         match: `${TVMAZE_TEST_BASE_URL}/schedule?country=US&date=2026-09-18`,
         respond: Response.json([
@@ -415,6 +499,7 @@ describe('tvmaze_get_schedule', () => {
         channel: 'AMC',
         channel_type: 'network',
         channel_country: 'US',
+        network: { name: 'AMC', country: 'US', timezone: 'America/New_York' },
       });
 
       const text = result.content.map((block) => (block as { text: string }).text).join('\n');
@@ -426,7 +511,7 @@ describe('tvmaze_get_schedule', () => {
       expect(text).not.toContain('average_runtime_minutes');
       for (const line of [
         '**id:** 169',
-        '**url:** https://www.tvmaze.com/shows/169/breaking-bad',
+        '**url:** [Open link](<https://www.tvmaze.com/shows/169/breaking-bad>)',
         '**type:** Scripted',
         '**genres:** Drama, Crime, Thriller',
         '**channel:** AMC',

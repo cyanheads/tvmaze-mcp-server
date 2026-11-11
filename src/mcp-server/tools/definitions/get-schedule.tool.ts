@@ -7,7 +7,12 @@
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
 
-import { getTvmazeService, normalizeCountry, todayIn } from '@/services/tvmaze/tvmaze-service.js';
+import {
+  getTvmazeService,
+  mergeScheduleCarriers,
+  normalizeCountry,
+  todayIn,
+} from '@/services/tvmaze/tvmaze-service.js';
 import type { ScheduleEntry, ScheduleFeed } from '@/services/tvmaze/types.js';
 import { DEFAULT_PAGE_SIZE, enrichPage, pageOf } from './paging.js';
 import {
@@ -22,7 +27,7 @@ import {
 
 export const getSchedule = tool('tvmaze_get_schedule', {
   description:
-    'List television episodes airing on a given date. Scope "linear" covers broadcast and cable networks in one country; "streaming" covers streaming services — global services such as Netflix and Prime Video when no country is given, or that country’s local streaming services when one is. Scope "all" merges both. The source caches schedule data for up to an hour, so a same-day listing can lag a late change.',
+    'List television episodes airing on a given date. Scope "linear" covers broadcast and cable networks in one country and can include timed releases on local streaming services. Scope "streaming" covers global services when no country is given, or that country’s local streaming services when one is. Scope "all" merges all three feeds for the selected country. The source caches schedule data for up to an hour, so a same-day listing can lag a late change.',
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
 
   errors: [
@@ -66,7 +71,7 @@ export const getSchedule = tool('tvmaze_get_schedule', {
       .trim()
       .optional()
       .describe(
-        'Exact channel name, case-insensitive, such as "Netflix". Filters before paging. Blank means all channels.',
+        'Exact network or web channel name, case-insensitive, such as "Netflix". Matches either recorded carrier before paging. Blank means all channels.',
       ),
     date: z
       .string()
@@ -86,7 +91,7 @@ export const getSchedule = tool('tvmaze_get_schedule', {
       .enum(['linear', 'streaming', 'all'])
       .default('linear')
       .describe(
-        'Which feed to read. "linear" is broadcast and cable networks; "streaming" is streaming services; "all" merges both and costs three upstream requests.',
+        'Which feed to read. "linear" covers broadcast and cable and can include timed local streaming releases. "streaming" selects the local or global web feed based on country. "all" merges the linear, local web, and global web feeds in three upstream requests.',
       ),
     timezone: z
       .string()
@@ -121,7 +126,7 @@ export const getSchedule = tool('tvmaze_get_schedule', {
           feed: z
             .enum(['linear', 'streaming'])
             .describe(
-              'Which feed this entry came from — a broadcast/cable network, or a streaming service.',
+              'Source feed for this entry: "linear" for the country schedule, or "streaming" for a local or global web schedule. A duplicate keeps the first feed label.',
             ),
         }).describe('One episode airing on the requested date.'),
       )
@@ -223,20 +228,23 @@ export const getSchedule = tool('tvmaze_get_schedule', {
     }
 
     // The linear feed carries a country's own streaming services too, so a
-    // merged query can see one release twice. First occurrence wins.
-    const seen = new Set<number>();
-    const merged: ScheduleEntry[] = [];
+    // merged query can see one release twice. Keep the first row and fill absent carriers.
+    const byId = new Map<number, ScheduleEntry>();
     for (const entry of collected) {
-      if (seen.has(entry.id)) continue;
-      seen.add(entry.id);
-      merged.push(entry);
+      const first = byId.get(entry.id);
+      byId.set(entry.id, first ? mergeScheduleCarriers(first, entry) : entry);
     }
+    const merged = [...byId.values()];
     merged.sort((a, b) => (Date.parse(a.airstamp) || 0) - (Date.parse(b.airstamp) || 0));
 
     const channel = input.channel || undefined;
     const channelKey = channel?.toLowerCase();
     const filtered = channel
-      ? merged.filter((entry) => entry.show.channel?.toLowerCase() === channelKey)
+      ? merged.filter(
+          ({ show }) =>
+            show.network?.name.trim().toLowerCase() === channelKey ||
+            show.web_channel?.name.trim().toLowerCase() === channelKey,
+        )
       : merged;
     const page = pageOf(filtered, input.cursor, input.limit, ctx);
     ctx.log.info('Schedule fetched', {
@@ -249,18 +257,40 @@ export const getSchedule = tool('tvmaze_get_schedule', {
     ctx.enrich({ applied_feeds: succeeded });
 
     const fragments: string[] = [];
-    if (channel && merged.length > 0 && filtered.length === 0) {
-      const available = [
-        ...new Set(merged.flatMap((entry) => (entry.show.channel ? [entry.show.channel] : []))),
-      ].sort();
-      fragments.push(
-        `No entries match channel "${channel}". Remove channel to browse all entries. Available channels: ${available.slice(0, 10).join(', ') || 'none named'}.${available.length > 10 ? ' This list is incomplete; only the first 10 names are shown.' : ''}`,
-      );
+    if (channel && filtered.length === 0) {
+      if (merged.length > 0) {
+        const available = new Set<string>();
+        for (const { show } of merged) {
+          if (show.network) available.add(show.network.name);
+          if (show.web_channel) available.add(show.web_channel.name);
+        }
+        fragments.push(
+          `No entries match channel "${channel}". Remove channel to browse all entries. Available channels: ${[...available].sort().slice(0, 10).join(', ') || 'none named'}.${available.size > 10 ? ' This list is incomplete; only the first 10 names are shown.' : ''}`,
+        );
+      }
+
+      const retry = { date, timezone, channel };
+      const all = JSON.stringify({ ...retry, scope: 'all', country: defaultedCountry });
+      if (input.scope === 'linear') {
+        fragments.push(
+          `For local and global streaming releases, call tvmaze_get_schedule with ${all}.`,
+        );
+      } else if (input.scope === 'streaming' && explicitCountry) {
+        const global = JSON.stringify({ ...retry, scope: 'streaming' });
+        fragments.push(
+          `For a global service, call tvmaze_get_schedule with ${global}. To add linear and global coverage, use ${all}.`,
+        );
+      } else if (input.scope === 'streaming') {
+        const local = JSON.stringify({ ...retry, scope: 'streaming', country: defaultedCountry });
+        fragments.push(
+          `For a country-local service, call tvmaze_get_schedule with ${local}, using that service’s country. To add linear and local coverage, use ${all} with the relevant country.`,
+        );
+      }
     }
     if (merged.length === 0) {
       if (input.scope === 'linear') {
         fragments.push(
-          `Nothing is listed for ${defaultedCountry} on ${date}. The linear feed covers broadcast and cable networks plus that country’s own streaming services; call tvmaze_get_schedule again with scope "streaming" for global services such as Netflix.`,
+          `Nothing is listed for ${defaultedCountry} on ${date}. Linear covers broadcast and cable and can include timed local streaming releases. For the local web feed, use scope "streaming" with that country.`,
         );
       } else if (input.scope === 'streaming' && explicitCountry) {
         fragments.push(

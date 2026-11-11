@@ -514,7 +514,9 @@ describe('tvmaze_get_episodes', () => {
       const result = await runToolContract(getEpisodes, { show_id: 2756, air_date: '2025-03-12' });
       expect(result.isError).toBeFalsy();
       expect(result.structuredContent).toMatchObject({
-        episodes: [{ id: 3_166_429, local_date: '2025-03-13', time_known: true }],
+        episodes: [
+          { id: 3_166_429, airdate: '2025-03-12', local_date: '2025-03-13', time_known: true },
+        ],
         air_date: '2025-03-12',
         has_more: false,
         totalCount: 1,
@@ -524,6 +526,7 @@ describe('tvmaze_get_episodes', () => {
       const text = (result.content[0] as { text: string }).text;
       expect(text).toContain('# The Late Show with Stephen Colbert — air date 2025-03-12');
       expect(text).toContain('**air_date:** 2025-03-12');
+      expect(text).toContain('**airdate:** 2025-03-12');
       expect(getHttp().calls.map((call) => call.request.url)).toContain(byDateUrl('2025-03-12'));
     });
 
@@ -688,6 +691,7 @@ describe('tvmaze_get_episodes', () => {
         {
           "episodes": [
             {
+              "airdate": "2008-01-20",
               "airstamp": "2008-01-21T03:00:00+00:00",
               "id": 1,
               "image_url": "https://static.tvmaze.com/uploads/images/original_untouched/0/1.jpg",
@@ -727,6 +731,11 @@ describe('tvmaze_get_episodes', () => {
             "image_url": "https://static.tvmaze.com/uploads/images/original_untouched/0/2400.jpg",
             "language": "English",
             "name": "Breaking Bad",
+            "network": {
+              "country": "US",
+              "name": "AMC",
+              "timezone": "America/New_York",
+            },
             "premiered": "2008-01-20",
             "rating": 9.3,
             "runtime_minutes": 60,
@@ -746,24 +755,25 @@ describe('tvmaze_get_episodes', () => {
           {
             "text": "# Breaking Bad — Season 1
         **season:** 1 | **timezone:** UTC
-        **id:** 169 | **url:** https://www.tvmaze.com/shows/169/breaking-bad
+        **id:** 169 | **url:** [Open link](<https://www.tvmaze.com/shows/169/breaking-bad>)
         **type:** Scripted | **language:** English | **status:** Ended
         **premiered:** 2008-01-20 | **ended:** 2013-09-29
         **genres:** Drama, Crime, Thriller
         **channel:** AMC | **channel_type:** network | **channel_country:** US
+        **network:** AMC (country: US, timezone: America/New_York) | **web_channel:** Not available
         **runtime_minutes:** 60 | **average_runtime_minutes:** 47
         **rating:** 9.3
         **externals:** imdb tt0903747 · thetvdb 81189 · tvrage 18164
-        **image_url:** https://static.tvmaze.com/uploads/images/original_untouched/0/2400.jpg
+        **image_url:** ![Image](<https://static.tvmaze.com/uploads/images/original_untouched/0/2400.jpg>)
         **summary:**
         > **Breaking Bad** follows protagonist Walter White.
         > 
         > A high school chemistry teacher.
 
         **name:** Pilot | **id:** 1 | **season:** 1 | **number:** 1 | **type:** regular
-        **local_date:** 2008-01-21 | **local_time:** 2008-01-21 03:00 UTC
+        **airdate:** 2008-01-20 | **local_date:** 2008-01-21 | **local_time:** 2008-01-21 03:00 UTC
         **time_known:** true | **airstamp:** 2008-01-21T03:00:00+00:00 | **runtime_minutes:** 58 | **rating:** 8.7
-        **url:** https://www.tvmaze.com/episodes/11/breaking-bad-1x01-pilot | **image_url:** https://static.tvmaze.com/uploads/images/original_untouched/0/1.jpg
+        **url:** [Open link](<https://www.tvmaze.com/episodes/11/breaking-bad-1x01-pilot>) | **image_url:** ![Image](<https://static.tvmaze.com/uploads/images/original_untouched/0/1.jpg>)
         **summary:**
         > Walter White begins his transformation.
 
@@ -800,6 +810,7 @@ describe('tvmaze_get_episodes', () => {
         {
           "episodes": [
             {
+              "airdate": "2008-01-20",
               "airstamp": "2008-01-21T03:00:00+00:00",
               "id": 1,
               "image_url": "https://static.tvmaze.com/uploads/images/original_untouched/0/1.jpg",
@@ -816,6 +827,7 @@ describe('tvmaze_get_episodes', () => {
               "url": "https://www.tvmaze.com/episodes/11/breaking-bad-1x01-pilot",
             },
             {
+              "airdate": "2008-01-20",
               "airstamp": "2008-01-21T03:00:00+00:00",
               "id": 2,
               "image_url": "https://static.tvmaze.com/uploads/images/original_untouched/0/1.jpg",
@@ -853,6 +865,11 @@ describe('tvmaze_get_episodes', () => {
             "image_url": "https://static.tvmaze.com/uploads/images/original_untouched/0/2400.jpg",
             "language": "English",
             "name": "Breaking Bad",
+            "network": {
+              "country": "US",
+              "name": "AMC",
+              "timezone": "America/New_York",
+            },
             "premiered": "2008-01-20",
             "rating": 9.3,
             "runtime_minutes": 60,
@@ -872,31 +889,32 @@ describe('tvmaze_get_episodes', () => {
           {
             "text": "# Breaking Bad — all episodes
         **season:** Not available | **timezone:** UTC
-        **id:** 169 | **url:** https://www.tvmaze.com/shows/169/breaking-bad
+        **id:** 169 | **url:** [Open link](<https://www.tvmaze.com/shows/169/breaking-bad>)
         **type:** Scripted | **language:** English | **status:** Ended
         **premiered:** 2008-01-20 | **ended:** 2013-09-29
         **genres:** Drama, Crime, Thriller
         **channel:** AMC | **channel_type:** network | **channel_country:** US
+        **network:** AMC (country: US, timezone: America/New_York) | **web_channel:** Not available
         **runtime_minutes:** 60 | **average_runtime_minutes:** 47
         **rating:** 9.3
         **externals:** imdb tt0903747 · thetvdb 81189 · tvrage 18164
-        **image_url:** https://static.tvmaze.com/uploads/images/original_untouched/0/2400.jpg
+        **image_url:** ![Image](<https://static.tvmaze.com/uploads/images/original_untouched/0/2400.jpg>)
         **summary:**
         > **Breaking Bad** follows protagonist Walter White.
         > 
         > A high school chemistry teacher.
 
         **name:** Pilot | **id:** 1 | **season:** 1 | **number:** 1 | **type:** regular
-        **local_date:** 2008-01-21 | **local_time:** 2008-01-21 03:00 UTC
+        **airdate:** 2008-01-20 | **local_date:** 2008-01-21 | **local_time:** 2008-01-21 03:00 UTC
         **time_known:** true | **airstamp:** 2008-01-21T03:00:00+00:00 | **runtime_minutes:** 58 | **rating:** 8.7
-        **url:** https://www.tvmaze.com/episodes/11/breaking-bad-1x01-pilot | **image_url:** https://static.tvmaze.com/uploads/images/original_untouched/0/1.jpg
+        **url:** [Open link](<https://www.tvmaze.com/episodes/11/breaking-bad-1x01-pilot>) | **image_url:** ![Image](<https://static.tvmaze.com/uploads/images/original_untouched/0/1.jpg>)
         **summary:**
         > Walter White begins his transformation.
 
         **name:** Pilot | **id:** 2 | **season:** 1 | **number:** 2 | **type:** regular
-        **local_date:** 2008-01-21 | **local_time:** 2008-01-21 03:00 UTC
+        **airdate:** 2008-01-20 | **local_date:** 2008-01-21 | **local_time:** 2008-01-21 03:00 UTC
         **time_known:** true | **airstamp:** 2008-01-21T03:00:00+00:00 | **runtime_minutes:** 58 | **rating:** 8.7
-        **url:** https://www.tvmaze.com/episodes/11/breaking-bad-1x01-pilot | **image_url:** https://static.tvmaze.com/uploads/images/original_untouched/0/1.jpg
+        **url:** [Open link](<https://www.tvmaze.com/episodes/11/breaking-bad-1x01-pilot>) | **image_url:** ![Image](<https://static.tvmaze.com/uploads/images/original_untouched/0/1.jpg>)
         **summary:**
         > Walter White begins his transformation.
 

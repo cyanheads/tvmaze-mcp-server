@@ -43,7 +43,7 @@ describe('tvmaze_get_next_episode', () => {
     expect(result.structuredContent).toMatchObject({
       found: true,
       show: { id: 169 },
-      next_episode: { id: 20, name: 'Next Up' },
+      next_episode: { id: 20, name: 'Next Up', airdate: '2008-01-20' },
       previous_episode: { id: 19, name: 'Last One' },
       timezone: 'America/Los_Angeles',
     });

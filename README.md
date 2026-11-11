@@ -7,7 +7,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/Version-0.3.0-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/tvmaze-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-^2.3.1-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/tvmaze-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/tvmaze-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-^7.0.2-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.4.3-blueviolet.svg?style=flat-square)](https://bun.sh/)
+[![Version](https://img.shields.io/badge/Version-0.3.0-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/tvmaze-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-^2.4.0-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/tvmaze-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/tvmaze-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-^7.0.2-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.4.4-blueviolet.svg?style=flat-square)](https://bun.sh/)
 
 </div>
 
@@ -58,6 +58,7 @@ TV data from TVmaze: shows, episode guides, cast, and air times. Find a show by 
 
 - `show_id` from `tvmaze_search_shows`, `tvmaze_lookup_show`, or a schedule row; optional IANA `timezone` for episode times
 - Returns the full profile (`schedule_days` / `schedule_time`, optional `schedule_timezone`, `official_site`, `externals`) with every season plus `next_episode` / `previous_episode`. A `Running` show with nothing announced comes back with a notice pointing at `previous_episode`
+- Shows and seasons expose the recorded `network` and `web_channel` with their own country and timezone when available. The full profile prefers the network for its primary channel and usual premiere slot. `schedule_days` are programming weekdays, so a late-night slot may fall on the next calendar day
 - An unknown `show_id` fails as `show_not_found`
 
 ---
@@ -88,8 +89,8 @@ TV data from TVmaze: shows, episode guides, cast, and air times. Find a show by 
 
 ### `tvmaze_get_schedule` <sub>tool</sub>
 
-- `scope` picks the feed: `linear` is one country's broadcast and cable networks plus its own streaming services, `streaming` is global services when `country` is omitted and that country's local ones when given, `all` merges both
-- `date` defaults to today in the requested `timezone`; `country` is ISO 3166-1 alpha-2 (the United Kingdom is `GB`) and falls back to the configured default for `linear` and `all`; optional `channel` filters by exact, case-insensitive channel name; `limit` defaults to 50 (max 250)
+- `scope` picks the feed. `linear` covers one country's broadcast and cable networks and can include timed local streaming releases. `streaming` reads that country's local web feed when given `country`, or the global web feed when omitted. `all` merges all three feeds
+- `date` defaults to today in the requested `timezone`. `country` is ISO 3166-1 alpha-2 (the United Kingdom is `GB`) and falls back to the configured default for `linear` and `all`. `channel` matches either recorded carrier by exact, case-insensitive name, and a miss suggests follow-up calls for omitted feeds. `limit` defaults to 50 (max 250)
 - Entries carry `feed` (`linear` / `streaming`) and a compact `show` reference (`tvmaze_get_show` returns the full profile). `applied_feeds` names the feeds that answered, e.g. `["linear:GB","web:GB","web:global"]`; one failing feed degrades to a notice instead of failing the call
 
 ---
@@ -104,6 +105,7 @@ TV data from TVmaze: shows, episode guides, cast, and air times. Find a show by 
 
 - Supply exactly one of `query` (name search) or `person_id` (from cast credits or a candidate). Search returns compact candidates with source scores and never picks one for you; ten candidates may mean the source cap, so narrow the name
 - A `person_id` returns the person and one `credit_kind`: `cast` (default), `guest`, or `crew`; `limit` (default 50, max 250) and `cursor` apply only here. Guest `episode_id` chains to `tvmaze_get_cast`; `show_id` chains to `tvmaze_get_show` or `tvmaze_get_episodes`
+- Guest credits include `season`, `episode_number`, and `airdate` when known. Cast and crew credits include available `show_premiered`, `show_ended`, and `show_status`
 - No candidates or credits is an empty success; a missing id is `person_not_found`
 
 ## Features
@@ -114,7 +116,7 @@ TVmaze-specific:
 
 - Keyless — no account, no API key, and every tool works on a fresh install with nothing configured
 - Requests are paced under TVmaze's per-IP limit, back off on 429 (honoring `Retry-After`), and are cached in-process
-- Air times are computed from `airstamp` alone, since `airdate` / `airtime` can be a full day off on overnight slots
+- Known air times are computed from `airstamp`. Episodes also return the source's `airdate` label when available. On overnight slots it may differ from the local calendar date
 - Community-authored HTML summaries are stripped to plain text
 
 Agent-friendly output:
@@ -123,6 +125,10 @@ Agent-friendly output:
 - Typed errors on every tool, each with a `reason` and a recovery hint
 - Resolution misses are results: `tvmaze_lookup_show` and the title arm of `tvmaze_get_next_episode` return `found: false` with `guidance` for the next call
 - Output states what a call covered: the echoed query, `applied_feeds`, pre-page totals, and truncation against the source's caps
+
+## Agent guide
+
+The [TVmaze guide](./skills/tvmaze-guide/SKILL.md) covers schedule coverage, overnight episodes, and credit verification. Plugin and MCPB installs include it. Compatible MCP clients can discover it through the Skills extension.
 
 ## Data and licensing
 
@@ -208,7 +214,7 @@ MCP_TRANSPORT_TYPE=http MCP_HTTP_PORT=3010 bun run start:http
 
 ### Prerequisites
 
-- [Bun v1.4.0](https://bun.sh/) or higher (or Node.js v24+).
+- [Bun v1.4.4](https://bun.sh/) or higher (or Node.js v24+).
 - No TVmaze account or API key. Set `TVMAZE_DEFAULT_TIMEZONE` and `TVMAZE_DEFAULT_COUNTRY` once if the calls should default to somewhere other than UTC and the US.
 
 ### Installation
@@ -299,11 +305,12 @@ The Dockerfile defaults to HTTP transport, stateless session mode, and logs to `
 
 | Directory | Purpose |
 |:----------|:--------|
-| `src/index.ts` | `createApp()` entry point — registers the eight tools, server instructions, and the service lifecycle. |
+| `src/index.ts` | `createApp()` entry point for tool registration, the agent guide, server instructions, and the service lifecycle. |
 | `src/config` | Server-specific environment variable parsing and validation with Zod. |
 | `src/mcp-server/tools` | Tool definitions (`*.tool.ts`) and the output schemas they share. |
 | `src/services/tvmaze` | TVmaze REST client — pacing, retries, response cache, and normalization into the domain types. |
 | `tests/` | Unit and integration tests mirroring `src/`. |
+| `skills/` | Published guide for agents using the TVmaze tools. |
 | `docs/` | Design document and the generated project tree. |
 
 ## Development guide

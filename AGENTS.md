@@ -2,9 +2,9 @@
 
 **Server:** tvmaze-mcp-server
 **Version:** 0.3.0
-**Framework:** [@cyanheads/mcp-ts-core](https://www.npmjs.com/package/@cyanheads/mcp-ts-core) `^0.13.15`
-**Engines:** Bun ≥1.4.0, Node ≥24.0.0
-**MCP SDK:** `@modelcontextprotocol/server` ^2.3.1
+**Framework:** [@cyanheads/mcp-ts-core](https://www.npmjs.com/package/@cyanheads/mcp-ts-core) `^0.13.22`
+**Engines:** Bun ≥1.4.4, Node ≥24.0.0
+**MCP SDK:** `@modelcontextprotocol/server` ^2.4.0
 **Zod:** ^4.6.7
 
 > **Read the framework docs first:** `node_modules/@cyanheads/mcp-ts-core/CLAUDE.md` contains the full API reference — builders, Context, error codes, exports, patterns. This file covers server-specific conventions only.
@@ -147,12 +147,12 @@ Conventions this surface holds to, and that a new tool inherits:
 - **Output shapes are shared, error contracts are not.** `ShowSummary`, `ScheduleShow`, `Episode`, `Season`, and `CastCredit` — plus the `format()` renderers that keep them at parity — live in `shared-schemas.ts`. Each tool declares its own `errors[]` inline; per-tool repetition is the intended cost of locality.
 - **List tools page through `paging.ts`, not `paginateArray`.** `pageOf` takes the page size from the current `limit` and only the offset from the cursor; `enrichPage` writes `totalCount`, `truncated` / `shown` / `cap`, and one joined `notice` — pass a tool's own notice fragments to it rather than calling `ctx.enrich.notice`, which is last-wins.
 - **No tool declares `auth` scopes.** Every tool reads public data from a keyless API and the deployment posture is `MCP_AUTH_MODE=none`. A deployment that later enables JWT adds one `tool:<name>:read` scope per tool then.
-- **An absent optional value renders as `Not available`**, never `0`, `""`, or a dropped line — that is what keeps `format-parity` holding on TVmaze's sparse records.
+- **An absent optional value renders as `Not available`**, never `0`, `""`, or a dropped line — that is what keeps `format-parity` holding on TVmaze's sparse records. URL and image fields use the framework's Markdown link and image helpers. The local inline renderer keeps headings and table cells on one line.
 - **A hit-or-miss result is one flat `z.object` with optional fields**, never a `z.discriminatedUnion` (`tool()` rejects a union as an output root), and `format()` renders each arm from its own `if` block.
 
 ### Resource / Prompt
 
-This server ships neither — everything is reachable through the eight tools, a `tvmaze://shows/{id}` resource would only mirror `tvmaze_get_show` while demanding the one thing a caller starting from a title lacks, and the domain has no recurring interaction worth templating (`docs/design.md` § Design Decisions). If that changes, the `add-resource` and `add-prompt` skills carry the current patterns — don't hand-write one from memory.
+The SDK serves `skills/tvmaze-guide/SKILL.md` as an MCP skill resource and registers the `skill://{+path}` template. TVmaze records are retrieved through tools. The server registers no prompts.
 
 ### Server config
 
@@ -215,6 +215,7 @@ await createApp({
   title: 'tvmaze-mcp-server',
   tools: [searchShows, getShow, lookupShow, getNextEpisode, getEpisodes, getSchedule, getCast, getPerson],
   instructions: INSTRUCTIONS, // session-level context, sent on every initialize
+  skills: 'skills',
 });
 ```
 
@@ -348,6 +349,8 @@ Skills are modular instructions in `framework-skills/` at the project root. Read
 
 **Agent skill directory:** Copy skills into the directory your agent discovers (Claude Code: `.claude/skills/`, others: equivalent). Skills then load as context without referencing `framework-skills/` paths. After framework updates, run the `maintenance` skill — Phase B re-syncs the agent directory.
 
+The published [TVmaze guide](skills/tvmaze-guide/SKILL.md) lives under root `skills/`. Use `framework-skills/add-skill/SKILL.md` when updating it.
+
 Available skills:
 
 | Skill | Purpose |
@@ -358,6 +361,7 @@ Available skills:
 | `add-app-tool` | Scaffold an MCP App tool + paired UI resource |
 | `add-resource` | Scaffold a new resource definition |
 | `add-prompt` | Scaffold a new prompt definition |
+| `add-skill` | Author an opt-in skill for the agents calling this server through MCP or a plugin |
 | `add-service` | Scaffold a new service integration |
 | `add-test` | Scaffold test file for a tool, resource, or service |
 | `field-test` | Exercise tools/resources/prompts with real inputs, verify behavior, report issues |
@@ -405,7 +409,7 @@ When you complete a skill's checklist, check the boxes and add a completion time
 | `bun run audit:fix` | `bun audit fix` — upgrade vulnerable packages to the lowest safe version within existing ranges (`--dry-run` previews, `--latest` rewrites ranges). First response when `devcheck` flags a transitive advisory; then `bun update <name>`, then `bun dedupe` |
 | `bun run audit:refresh` | Delete `bun.lock` and reinstall. Last resort after `audit:fix`, `bun update <name>`, and `bun dedupe` — re-resolves every ranged dep (the framework pin included) and rewrites the lockfile as `lockfileVersion: 2` |
 | `bun run lint:mcp` | Run the MCP definition linter standalone (rule catalog: `api-linter` skill) |
-| `bun run lint:packaging` | Packaging surface checks — `server.json`/`manifest.json` env-var parity (run by devcheck) |
+| `bun run lint:packaging` | Packaging checks — environment variable parity, bundle exclusions, plugin manifests, and the published skill tree |
 | `bun run list-skills` | Print the skill registry |
 | `bun run tree` | Generate directory structure doc |
 | `bun run format` | Auto-fix formatting (safe fixes only) |
@@ -423,7 +427,7 @@ When you complete a skill's checklist, check the boxes and add a completion time
 
 ## Bundling
 
-`npm run bundle` produces a `.mcpb` extension bundle for one-click install in Claude Desktop. The pack step is followed by `scripts/clean-mcpb.ts`, which prunes dev dependencies (`mcpb clean`) and strips two classes of `node_modules/**` content that root-anchored `.mcpbignore` patterns cannot reach: dependency-shipped agent docs (`framework-skills/`, `skills/`, `.claude/`, `.agents/`, `SKILL.md`) and platform-specific native bindings, which would otherwise lock the bundle to the platform it was packed on. A server using DataCanvas therefore ships a portable bundle without the DuckDB native — `@duckdb/node-api` is an optional peer loaded lazily, so canvas tools report an actionable install hint and every other tool works normally. MCPB is stdio-only — HTTP and Cloudflare Workers deployments are unaffected. Consumers who don't need it can delete `manifest.json` and `.mcpbignore`; `lint:packaging` skips cleanly.
+`bun run bundle` builds and cleans a stdio-only `.mcpb` extension for Claude Desktop. Keep repo-local paths in `.mcpbignore` root-anchored (for example, `/docs/`) so the exclusions do not strip dependency runtime paths. The cleaner removes dependency build-only files, native build intermediates, and agent documentation at package roots. The SDK’s runtime skill modules stay in the bundle. An intentionally published root `skills/` tree also ships.
 
 **Adding an env var requires both files:** `server.json` (registry discovery, `environmentVariables[]`) and `manifest.json` (bundle install UX, `mcp_config.env` + `user_config`). `lint:packaging` (run by `devcheck`) verifies the env var names match, that every `user_config` option is wired into `mcp_config.env` as `"X": "${user_config.X}"` (the host substitutes nothing else — `"${X}"` reaches the server as that literal string), and that an optional string option carries `"default": ""`.
 
@@ -486,7 +490,7 @@ import { Episode, episodeLines, field } from './shared-schemas.js';
 - [ ] Optional nested objects: handler guards for empty inner values from form-based clients (`if (input.obj?.field && ...)`, not just `if (input.obj)`). When regex/length constraints matter, use `z.union([z.literal(''), z.string().regex(...).describe(...)])` — literal variants are exempt from `describe-on-fields`.
 - [ ] JSDoc `@fileoverview` + `@module` on every file
 - [ ] `ctx.log` for logging — no `console`; every upstream call goes through `TvmazeService`, never `fetch` from a handler
-- [ ] Air times derived from `airstamp` only, never `airdate` + `airtime`; a record with no announced time reports `time_known: false` and no `local_time`
+- [ ] Known air times derive from `airstamp` alone. Preserve `airdate` as the source date label. A record with no announced time reports `time_known: false` and no `local_time`
 - [ ] Handlers throw on failure — error factories or plain `Error`, no try/catch
 - [ ] `format()` renders all data the LLM needs — different clients forward different surfaces (Claude Code → `structuredContent`, Claude Desktop → `content[]`); both must carry the same data
 - [ ] If wrapping external API: raw/domain/output schemas reviewed against real upstream sparsity/nullability before finalizing required vs optional fields
@@ -494,6 +498,7 @@ import { Episode, episodeLines, field } from './shared-schemas.js';
 - [ ] If wrapping external API: tests include at least one sparse payload case with omitted upstream fields
 - [ ] Registered in `createApp()` arrays (directly or via barrel exports)
 - [ ] Tests use `createMockContext()` from `@cyanheads/mcp-ts-core/testing`
+- [ ] Root `plugin.json` and `mcp.json` match package metadata and fixed stdio configuration. Codex forwards user variables through the `.codex-plugin/mcp.json` overlay, so keep the pointer in `.codex-plugin/plugin.json`.
 - [ ] `.codex-plugin/plugin.json` populated — `name`, `version`, `description`, `repository`, `license` from `package.json`; `interface.displayName` = the unscoped repo name (never the npm scope — `lint:packaging` enforces this); `interface.shortDescription` from `package.json` description
 - [ ] `.codex-plugin/mcp.json` updated — server name key is the unscoped repo name; every user-supplied variable (API key, contact email, instance URL) is listed in `env_vars` so Codex forwards it from the user's environment. Never write `"KEY": ""` into `env` — an empty value replaces the user's exported key and is read as unset
 - [ ] `.claude-plugin/plugin.json` populated — `name`, `version`, `description`, `author`, `repository`, `license`, `keywords` from `package.json`; inline `mcpServers` entry keyed by the unscoped repo name. Every user-supplied variable is declared under `userConfig` (`type`, `title`, `description`; `sensitive: true` for keys and tokens; `required: true` or `default: ""`) and referenced from `env` as `"KEY": "${user_config.<option>}"` — mirror the `user_config` block in `manifest.json`. Never write `"KEY": ""` into `env`

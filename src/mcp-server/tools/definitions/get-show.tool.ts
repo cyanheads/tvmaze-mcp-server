@@ -68,19 +68,19 @@ export const getShow = tool('tvmaze_get_show', {
         .string()
         .optional()
         .describe(
-          'IANA timezone of the selected channel’s recurring schedule. Absent when the channel does not provide one.',
+          'IANA timezone of the selected carrier for TVmaze’s usual premiere slot. The network is selected when both carriers are recorded. Absent when the selected carrier does not provide a timezone.',
         ),
       official_site: z.string().optional().describe('Show page on the network or studio site.'),
       schedule_days: z
         .array(z.string())
         .describe(
-          'Weekdays the show airs in its regular slot, e.g. ["Monday"]. Empty for a streaming release with no weekly slot.',
+          'Programming weekdays for the usual premiere slot, e.g. ["Monday"]. A late-night slot can fall on the next calendar day. Empty when no weekly slot is recorded.',
         ),
       schedule_time: z
         .string()
         .optional()
         .describe(
-          'Regular slot start time in the channel’s local 24-hour clock, e.g. "22:00"; schedule_timezone names that clock when known. Absent when there is no fixed slot.',
+          'TVmaze’s usual premiere slot as a local 24-hour clock label, e.g. "22:00"; schedule_timezone names the selected carrier’s clock when known. Absent when there is no fixed slot.',
         ),
     }).describe('Full show profile.'),
     seasons: z
